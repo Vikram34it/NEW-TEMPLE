@@ -504,6 +504,8 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   sheet.appendRow(row);
 
   audit_(module, 'Create', id, '', JSON.stringify(record));
+
+  if (isBalanceSheet_(sheetName)) resyncLedger_();
   return readRowById_(sheetName, headers, idCol, id, row, sheet.getLastRow());
 }
 
@@ -530,6 +532,7 @@ function updateRecord_(sheetName, headers, record, idCol) {
       }
       sheet.getRange(r + 2, 1, 1, headers.length).setValues([values]);
       audit_(toModule_(sheetName), 'Update', id, '', JSON.stringify(values));
+      if (isBalanceSheet_(sheetName)) resyncLedger_();
       return { success: true };
     }
   }
@@ -546,6 +549,7 @@ function softDeleteRecord_(sheetName, idCol, id) {
         sheet.getRange(r + 2, deletedCol).setValue('TRUE');
       }
       audit_(toModule_(sheetName), 'SoftDelete', id, '', 'TRUE');
+      if (isLedgerSheet_(sheetName)) resyncLedger_();
       return { success: true, softDeleted: true };
     }
   }
@@ -738,6 +742,15 @@ function getSettings_() {
  * ========================================================================== */
 
 function buildDashboard_() {
+  // Self-heal: rebuild the ledger + recompute balances before reporting, so
+  // the dashboard always reflects the current recorded money flows even if a
+  // previous request failed mid-write. Never let this break the dashboard.
+  try {
+    resyncLedger_();
+  } catch (e1) {
+    Logger.log('Ledger resync failed: ' + e1);
+  }
+
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).filter(notDeleted_);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
@@ -849,6 +862,135 @@ function monthlyTrend_(donations, expenses) {
   });
   var keys = Object.keys(map).sort();
   return keys.map(function (k) { return { month: k, donations: map[k].donations, expenses: map[k].expenses }; });
+}
+
+/* ==========================================================================
+ * LEDGER + BALANCES
+ *
+ * Every donation posts an `income` transaction and every expense posts an
+ * `expense` transaction. Account balances are always DERIVED from the
+ * Transactions sheet (Opening + income - expense) - never manually edited -
+ * so the dashboard cash/bank figures always match the recorded money flows.
+ * reconcileLedger_() rebuilds the auto-posted entries (and drops the entries
+ * of deleted records), recomputeBalances_() writes the resulting balances back
+ * to the Accounts sheet. Both are idempotent and safe to run on every request.
+ * ========================================================================== */
+
+/* Which account a payment method belongs to: cash -> the cash account,
+ * anything else (UPI / bank transfer / cheque / card) -> the bank account. */
+function accountForPaymentMethod_(method) {
+  var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+  var target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank';
+  for (var i = 0; i < accounts.length; i++) {
+    if (String(accounts[i].Type).toLowerCase() === target) return accounts[i].AccountName;
+  }
+  if (accounts.length) return accounts[0].AccountName;
+  return 'Main Bank Account';
+}
+
+/* Rebuild every auto-posted transaction from the live (non-deleted)
+ * donations and expenses. Any transaction whose ReferenceID points at a
+ * DON-/EXP- record is regenerated; ones with no source record (deleted) and
+ * duplicates are removed. Manual transactions are left untouched. */
+function reconcileLedger_() {
+  var txSheet = sheet_(CONFIG.sheetNames.transactions);
+  var txHeader = HEADERS.transactions;
+  var txData = tableData_(CONFIG.sheetNames.transactions, txHeader);
+
+  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
+
+  var desired = {};
+  donations.forEach(function (d) {
+    if (!notDeleted_(d)) return;
+    desired[String(d.DonationID).toUpperCase()] = {
+      type: 'income', incomeOrExpense: 'income',
+      amount: toNum_(d.Amount), date: String(d.Date),
+      account: accountForPaymentMethod_(d.PaymentMethod),
+      referenceID: String(d.DonationID),
+      description: 'Donation - ' + (d.DonorName || ''),
+      createdBy: d.ReceivedBy || 'system',
+    };
+  });
+  expenses.forEach(function (e) {
+    if (!notDeleted_(e)) return;
+    desired[String(e.ExpenseID).toUpperCase()] = {
+      type: 'expense', incomeOrExpense: 'expense',
+      amount: toNum_(e.Amount), date: String(e.Date),
+      account: accountForPaymentMethod_(e.PaymentMethod),
+      referenceID: String(e.ExpenseID),
+      description: 'Expense - ' + (e.Description || ''),
+      createdBy: e.PaidBy || 'system',
+    };
+  });
+
+  // Drop every auto-posted transaction (DO NOT drop manual ones).
+  var rowsToDelete = [];
+  for (var i = 0; i < txData.length; i++) {
+    var ref = String(txData[i].ReferenceID || '').toUpperCase();
+    if (ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0) {
+      rowsToDelete.push(i + 2); // data starts at row 2
+    }
+  }
+  rowsToDelete.sort(function (a, b) { return b - a; }); // bottom-up so indices stay valid
+  for (var d2 = 0; d2 < rowsToDelete.length; d2++) {
+    txSheet.deleteRow(rowsToDelete[d2]);
+  }
+
+  // Add the desired entries.
+  for (var ref in desired) {
+    if (!desired.hasOwnProperty(ref)) continue;
+    var ent = desired[ref];
+    txSheet.appendRow([
+      nextIdFor_(CONFIG.sheetNames.transactions, txHeader[0], 'TXN-'),
+      ent.date, ent.type, ent.incomeOrExpense, ent.amount,
+      ent.account, ent.referenceID, ent.description, ent.createdBy,
+    ]);
+  }
+}
+
+/* Write CurrentBalance = OpeningBalance + income - expense per account. */
+function recomputeBalances_() {
+  var acctSheet = sheet_(CONFIG.sheetNames.accounts);
+  var acctHeader = HEADERS.accounts;
+  var rows = acctSheet.getDataRange().getValues();
+  var txns = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
+  var nameIdx = acctHeader.indexOf('AccountName');
+  var openIdx = acctHeader.indexOf('OpeningBalance');
+  var curIdx = acctHeader.indexOf('CurrentBalance');
+  if (nameIdx < 0 || openIdx < 0 || curIdx < 0) return;
+
+  for (var i = 1; i < rows.length; i++) {
+    var name = String(rows[i][nameIdx] || '');
+    if (!name) continue;
+    var opening = toNum_(rows[i][openIdx]);
+    var inc = 0, exp = 0;
+    txns.forEach(function (t) {
+      if (String(t.Account) !== name) return;
+      if (String(t.IncomeOrExpense) === 'income') inc += toNum_(t.Amount);
+      else if (String(t.IncomeOrExpense) === 'expense') exp += toNum_(t.Amount);
+    });
+    var balance = opening + inc - exp;
+    if (toNum_(rows[i][curIdx]) !== balance) {
+      acctSheet.getRange(i + 1, curIdx + 1).setValue(balance);
+    }
+  }
+}
+
+function isLedgerSheet_(sheetName) {
+  return sheetName === CONFIG.sheetNames.donations || sheetName === CONFIG.sheetNames.expenses;
+}
+
+function isBalanceSheet_(sheetName) {
+  return isLedgerSheet_(sheetName) ||
+    sheetName === CONFIG.sheetNames.accounts ||
+    sheetName === CONFIG.sheetNames.transactions;
+}
+
+/* Keep the ledger + balances in sync after any money-related mutation. */
+function resyncLedger_() {
+  reconcileLedger_();
+  recomputeBalances_();
 }
 
 function pad2_(n) { return n < 10 ? '0' + n : String(n); }

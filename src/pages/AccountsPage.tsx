@@ -19,12 +19,7 @@ export function AccountsPage() {
   const { accounts, transactions, can, addAccount } = useApp()
   const [showAdd, setShowAdd] = useState(false)
 
-  const accountTxs = (account: string) => {
-    if (account === 'Temple Cash' || account === 'Main Bank Account') {
-      return transactions
-    }
-    return transactions.filter((t) => t.account === account)
-  }
+  const accountTxs = (account: string) => transactions.filter((t) => t.account === account)
 
   return (
     <div className="space-y-4">

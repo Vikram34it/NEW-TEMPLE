@@ -1,3 +1,5 @@
+import type { Account } from '../types'
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -38,6 +40,14 @@ export function formatDateTime(dateString: string): string {
 
 export function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+// Cash payments go to the cash account; everything else (UPI, bank transfer,
+// cheque, card, other) goes to the bank account.
+export function accountNameForPaymentMethod(method: string, accounts: Account[]): string {
+  const target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank'
+  const acc = accounts.find((a) => a.type === target)
+  return acc?.accountName || accounts[0]?.accountName || 'Main Bank Account'
 }
 
 export function getCurrentYear(): number {

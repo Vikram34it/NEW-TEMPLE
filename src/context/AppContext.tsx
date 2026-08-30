@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
+import { accountNameForPaymentMethod } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -326,6 +327,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return allowed.includes('*') || allowed.includes(permission)
   }
 
+  // ---- Mock-mode ledger parity ----
+  // The live backend posts every donation/expense to the Transactions sheet
+  // and derives account balances from it. Mirror that behaviour here so the
+  // offline demo stays consistent (donations to cash -> cash account,
+  // everything else -> bank account; balances = opening + income - expense).
+  const recomputeMockBalances = (allTxns: Transaction[]) => {
+    setAccounts((prev) =>
+      prev.map((ac) => {
+        const inc = allTxns
+          .filter((t) => t.incomeOrExpense === 'income' && t.account === ac.accountName)
+          .reduce((s, t) => s + t.amount, 0)
+        const exp = allTxns
+          .filter((t) => t.incomeOrExpense === 'expense' && t.account === ac.accountName)
+          .reduce((s, t) => s + t.amount, 0)
+        return { ...ac, currentBalance: ac.openingBalance + inc - exp }
+      })
+    )
+  }
+
+  const postToMockLedger = (ds: Donation[], es: Expense[]) => {
+    const manual = transactions.filter(
+      (t) => !t.referenceID || !/^(DON|EXP)-/i.test(t.referenceID)
+    )
+    const auto: Transaction[] = []
+    ds.filter((d) => !d.deleted).forEach((d) => {
+      auto.push({
+        transactionID: `TXN-2026-${String(nextSeq()).padStart(4, '0')}`,
+        date: d.date,
+        type: 'income',
+        incomeOrExpense: 'income',
+        amount: d.amount,
+        account: accountNameForPaymentMethod(d.paymentMethod, accounts),
+        referenceID: d.donationID,
+        description: `Donation - ${d.donorName || ''}`,
+        createdBy: d.receivedBy || user?.name || '',
+      })
+    })
+    es.filter((e) => !e.deleted).forEach((e) => {
+      auto.push({
+        transactionID: `TXN-2026-${String(nextSeq()).padStart(4, '0')}`,
+        date: e.date,
+        type: 'expense',
+        incomeOrExpense: 'expense',
+        amount: e.amount,
+        account: accountNameForPaymentMethod(e.paymentMethod, accounts),
+        referenceID: e.expenseID,
+        description: `Expense - ${e.description || ''}`,
+        createdBy: e.paidBy || user?.name || '',
+      })
+    })
+    const next = [...auto, ...manual]
+    setTransactions(next)
+    recomputeMockBalances(next)
+  }
+
   // ---- Donations ----
   async function addDonation(d: Omit<Donation, 'donationID' | 'receiptNumber'>): Promise<Donation> {
     if (CONFIG_USE_LIVE) {
@@ -343,7 +399,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
     const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
     const donation: Donation = { ...d, donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() }
-    setDonations((prev) => [donation, ...prev])
+    const nextDonations = [donation, ...donations]
+    setDonations(nextDonations)
+    postToMockLedger(nextDonations, expenses)
     audit('Create', 'Donations', run)
     return donation
   }
@@ -360,6 +418,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw err
       }
     } else {
+      const next = donations.map((x) => (x.donationID === d.donationID ? { ...x, ...d } : x))
+      setDonations(next)
+      postToMockLedger(next, expenses)
       audit('Update', 'Donations', d.donationID)
     }
   }
@@ -376,6 +437,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw err
       }
     } else {
+      const next = donations.map((x) => (x.donationID === id ? { ...x, deleted: true } : x))
+      setDonations(next)
+      postToMockLedger(next, expenses)
       audit('SoftDelete', 'Donations', id)
     }
   }
@@ -401,7 +465,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
       return { ...d, donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() }
     })
-    setDonations((prev) => [...created, ...prev])
+    const nextDonations = [...created, ...donations]
+    setDonations(nextDonations)
+    postToMockLedger(nextDonations, expenses)
     audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
     return created
   }
@@ -422,7 +488,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const id = `EXP-2026-${String(nextSeq()).padStart(4, '0')}`
     const expense: Expense = { ...e, expenseID: id, createdAt: new Date().toISOString() }
-    setExpenses((prev) => [expense, ...prev])
+    const nextExpenses = [expense, ...expenses]
+    setExpenses(nextExpenses)
+    postToMockLedger(donations, nextExpenses)
     audit('Create', 'Expenses', id)
     return expense
   }
@@ -439,6 +507,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw err
       }
     } else {
+      const next = expenses.map((x) => (x.expenseID === e.expenseID ? { ...x, ...e } : x))
+      setExpenses(next)
+      postToMockLedger(donations, next)
       audit('Update', 'Expenses', e.expenseID)
     }
   }
@@ -455,6 +526,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw err
       }
     } else {
+      const next = expenses.map((x) => (x.expenseID === id ? { ...x, deleted: true } : x))
+      setExpenses(next)
+      postToMockLedger(donations, next)
       audit('SoftDelete', 'Expenses', id)
     }
   }
@@ -480,7 +554,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       expenseID: `EXP-2026-${String(nextSeq()).padStart(4, '0')}`,
       createdAt: new Date().toISOString(),
     }))
-    setExpenses((prev) => [...created, ...prev])
+    const nextExpenses = [...created, ...expenses]
+    setExpenses(nextExpenses)
+    postToMockLedger(donations, nextExpenses)
     audit('BulkCreate', 'Expenses', `${created.length} records`, `${created.map((c) => c.expenseID).join(', ')}`)
     return created
   }
@@ -814,7 +890,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const id = `TXN-2026-${String(nextSeq()).padStart(4, '0')}`
     const tx: Transaction = { ...t, transactionID: id }
-    setTransactions((prev) => [tx, ...prev])
+    const nextTransactions = [tx, ...transactions]
+    setTransactions(nextTransactions)
+    recomputeMockBalances(nextTransactions)
     audit('Create', 'Transactions', id)
     return tx
   }
