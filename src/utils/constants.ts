@@ -116,3 +116,89 @@ export const REQUEST_STATUSES = [
   'Resolved',
   'Closed',
 ] as const
+
+export const COMMUNICATION_CHANNELS = [
+  'WhatsApp',
+  'Email',
+  'SMS',
+  'Phone Call',
+  'In Person',
+  'Post',
+  'Other',
+] as const
+
+export const COMMUNICATION_TYPES = [
+  'Thank You',
+  'Receipt',
+  'Festival Greeting',
+  'Birthday Wish',
+  'Anniversary Wish',
+  'Invitation',
+  'Update/News',
+  'Re-engagement',
+  'Follow-up',
+  'Other',
+] as const
+
+export const COMMUNICATION_STATUSES = ['Sent', 'Done'] as const
+
+export const PERSON_CHANNELS = [
+  'WhatsApp',
+  'Email',
+  'SMS',
+  'Call',
+  'In Person',
+  'None',
+] as const
+
+export interface MessageTemplate {
+  id: string
+  label: string
+  subject: string
+  body: string
+}
+
+// Ready-made donor messages. {Name}, {Amount}, {TempleName}, {City} and
+// {Festival} are filled in from the selected donor + settings.
+export const DONOR_MESSAGE_TEMPLATES: MessageTemplate[] = [
+  {
+    id: 'thankyou',
+    label: 'Thank You',
+    subject: 'Thank you for your generous donation to {TempleName}',
+    body: 'Dear {Name},\n\n' +
+      'Thank you so much for your generous donation of ₹{Amount} to {TempleName}. Your kindness and support mean a great deal to our community and bring us one step closer to our vision.\n\n' +
+      'May the Lord bless you and your family abundantly.\n\n' +
+      'With sincere gratitude,\n{TempleName}',
+  },
+  {
+    id: 'birthday',
+    label: 'Birthday Wishes',
+    subject: 'Happy Birthday from {TempleName}',
+    body: 'Dear {Name},\n\n' +
+      'Wishing you a very happy birthday! May this new year of your life bring health, happiness and abundant blessings. We are deeply grateful for your continued love and support for {TempleName}.\n\n' +
+      'With love and blessings,\n{TempleName}',
+  },
+  {
+    id: 'festival',
+    label: 'Festival Greeting',
+    subject: 'Festival greetings from {TempleName}',
+    body: 'Dear {Name},\n\n' +
+      'Wishing you and your family a joyous and blessed {Festival}. Thank you for being a cherished part of the {TempleName} family.\n\n' +
+      'Hare Krishna!\n{TempleName}',
+  },
+  {
+    id: 'reengage',
+    label: 'We Miss You (Lapsed Donor)',
+    subject: 'We miss you at {TempleName}',
+    body: 'Dear {Name},\n\n' +
+      'We have missed you at {TempleName}. Your generous support has been a great blessing to us, and we would be honoured to welcome you once again. There is always something happening - festivals, seva and programs for everyone.\n\n' +
+      'We would love to see you soon.\n\n' +
+      'With warm regards,\n{TempleName}',
+  },
+  {
+    id: 'custom',
+    label: 'Custom Message',
+    subject: '',
+    body: 'Dear {Name},\n\n',
+  },
+]

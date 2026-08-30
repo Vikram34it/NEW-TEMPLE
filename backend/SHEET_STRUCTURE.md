@@ -14,9 +14,11 @@ Roles: `admin`, `accountant`, `manager`, `viewer`. Status: `active` / `inactive`
 > authentication differently (see SECURITY in Code.gs).
 
 ## 2. People
-PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Status | Notes
+PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Status | Notes | Birthday | Anniversary | PreferredChannel
 
 `PersonType` can hold multiple values separated by `,` (e.g. `Donor,Devotee`).
+
+`Birthday` / `Anniversary` are dates (YYYY-MM-DD; year optional). `PreferredChannel` is one of `WhatsApp`, `Email`, `SMS`, `Call`, `In Person`, `None` (used by Donor Care for greeting lists).
 
 ## 3. Donations
 DonationID | Date | DonorID | DonorName | Phone | Email | Address | Amount | Category | Purpose | PaymentMethod | TransactionReference | ReceivedBy | ReceiptNumber | Notes | CreatedAt | UpdatedAt | Deleted
@@ -61,6 +63,13 @@ Key | Value
 templeName | ISKCON Temple
 receiptPrefix | REC
 currency | INR
+
+## 12. Communication
+CommunicationID | PersonID | DonorName | Date | Channel | Type | Subject | Message | SentBy | Status
+
+Donor Care touchpoint log. `Channel`: WhatsApp, Email, SMS, Phone Call, In Person, Post, Other.
+`Type`: Thank You, Receipt, Festival Greeting, Birthday Wish, Anniversary Wish, Invitation,
+Update/News, Re-engagement, Follow-up, Other. `Status`: Sent / Done.
 
 ---
 

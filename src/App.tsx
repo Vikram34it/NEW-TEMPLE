@@ -17,6 +17,7 @@ import { AnnouncementsPage } from './pages/AnnouncementsPage'
 import { MessagesPage } from './pages/MessagesPage'
 import { EventsPage } from './pages/EventsPage'
 import { RequestsPage } from './pages/RequestsPage'
+import { DonorCarePage } from './pages/DonorCarePage'
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/messages" element={<MessagesPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/requests" element={<RequestsPage />} />
+            <Route path="/donor-care" element={<DonorCarePage />} />
             <Route path="*" element={<DashboardPage />} />
           </Route>
         </Routes>

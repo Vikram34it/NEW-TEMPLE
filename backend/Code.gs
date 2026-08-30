@@ -69,6 +69,7 @@ var CONFIG = {
     events: 'Events',
     eventVolunteers: 'EventVolunteers',
     requests: 'Requests',
+    communication: 'Communication',
   },
 };
 
@@ -226,7 +227,7 @@ function generateApiKey_(len) {
 
 var HEADERS = {
   users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password'],
-  people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes'],
+  people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes', 'Birthday', 'Anniversary', 'PreferredChannel'],
   donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted'],
   expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted'],
   vendors: ['VendorID', 'CompanyName', 'ContactPerson', 'Phone', 'Email', 'Address', 'ServiceType', 'GSTNumber', 'BankDetails', 'Notes'],
@@ -240,6 +241,7 @@ var HEADERS = {
   events: ['EventID', 'Title', 'Date', 'Time', 'Location', 'Description', 'Category', 'Budget', 'Organizer', 'Status'],
   eventVolunteers: ['VolunteerID', 'EventID', 'PersonID', 'Name', 'Role', 'RegisteredAt'],
   requests: ['RequestID', 'Date', 'PersonID', 'PersonName', 'Type', 'Description', 'AssignedTo', 'Status', 'Notes'],
+  communication: ['CommunicationID', 'PersonID', 'DonorName', 'Date', 'Channel', 'Type', 'Subject', 'Message', 'SentBy', 'Status'],
 };
 
 /* ==========================================================================
@@ -348,6 +350,7 @@ function route_(action, params, body, method) {
     case 'events': return readAll_(CONFIG.sheetNames.events, HEADERS.events);
     case 'eventVolunteers': return readAll_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers);
     case 'requests': return readAll_(CONFIG.sheetNames.requests, HEADERS.requests);
+    case 'communications': return readAll_(CONFIG.sheetNames.communication, HEADERS.communication);
 
     // --- Writes (generic CRUD, one endpoint per table) ---
     case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
@@ -407,9 +410,35 @@ function route_(action, params, body, method) {
     case 'updateRequest': return updateRecord_(CONFIG.sheetNames.requests, HEADERS.requests, body.record, 'RequestID');
     case 'deleteRequest': return hardDeleteRecord_(CONFIG.sheetNames.requests, 'RequestID', body.id);
 
+    // --- Donor care: communication log + real email sending ---
+    case 'createCommunication': return createRecord_(CONFIG.sheetNames.communication, HEADERS.communication, body.record, 'COM-', 'communication', ['DonorName']);
+    case 'updateCommunication': return updateRecord_(CONFIG.sheetNames.communication, HEADERS.communication, body.record, 'CommunicationID');
+    case 'deleteCommunication': return hardDeleteRecord_(CONFIG.sheetNames.communication, 'CommunicationID', body.id);
+    case 'sendDonorEmail': return sendDonorEmail_(body);
+
     default:
       throw new Error('Unknown action: ' + action);
   }
+}
+
+/* ==========================================================================
+ * DONOR CARE: send a real email to a donor from the temple's own Gmail.
+ * Uses GmailApp (free, no third-party service). Body may be plain text or
+ * simple HTML; we always fall back to plain text.
+ * ========================================================================== */
+
+function sendDonorEmail_(input) {
+  var to = (input && (input.to || input.email)) || '';
+  var subject = (input && input.subject) || '';
+  var bodyText = (input && (input.body || input.message)) || '';
+  if (!to) {
+    throw new Error('Recipient email is required');
+  }
+  if (!subject || !bodyText) {
+    throw new Error('Subject and message are required');
+  }
+  GmailApp.sendEmail(String(to), String(subject), String(bodyText));
+  return { sent: true, to: String(to), sentAt: new Date().toISOString() };
 }
 
 /* ==========================================================================
@@ -493,6 +522,11 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   if (module === 'request') {
     record.RequestID = id;
     if (record.Status === undefined) record.Status = 'open';
+  }
+  if (module === 'communication') {
+    record.CommunicationID = id;
+    if (record.Status === undefined) record.Status = 'Sent';
+    if (record.Date === undefined) record.Date = new Date().toISOString().slice(0, 10);
   }
 
   var row = [];

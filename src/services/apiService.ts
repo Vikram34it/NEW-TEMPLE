@@ -3,6 +3,7 @@ import { buildDashboardData, mockData } from '../data/mockData'
 import type {
   Account,
   Announcement,
+  Communication,
   DashboardData,
   Donation,
   EventVolunteer,
@@ -42,6 +43,7 @@ type RecordName =
   | 'events'
   | 'eventVolunteers'
   | 'requests'
+  | 'communications'
 
 type MutateOp = 'create' | 'update' | 'softDelete' | 'hardDelete' | 'delete'
 
@@ -173,6 +175,13 @@ const RECORD_META: Record<RecordName, RecordMeta> = {
     update: 'updateRequest',
     hardDelete: 'deleteRequest',
     skipOnCreate: ['requestID'],
+  },
+  communications: {
+    idField: 'communicationID',
+    create: 'createCommunication',
+    update: 'updateCommunication',
+    hardDelete: 'deleteCommunication',
+    skipOnCreate: ['communicationID'],
   },
 }
 
@@ -369,6 +378,22 @@ export const dataService = {
   },
   async getRequests(): Promise<PrayerRequest[]> {
     return (await api.load('requests')) as PrayerRequest[]
+  },
+  async getCommunications(): Promise<Communication[]> {
+    return (await api.load('communications')) as Communication[]
+  },
+
+  // Send a real email to a donor from the temple's own Gmail (live backend).
+  // In demo mode this just simulates a successful send.
+  async sendDonorEmail(to: string, subject: string, body: string): Promise<{ sent: boolean; to: string; sentAt: string }> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('sendDonorEmail', {}, { to, subject, body })) as {
+        sent: boolean
+        to: string
+        sentAt: string
+      }
+    }
+    return { sent: true, to, sentAt: new Date().toISOString() }
   },
 
   // Mark a message as read (partial update against the backend / mock store).

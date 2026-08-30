@@ -8,6 +8,7 @@ import type {
   Account,
   Announcement,
   AuditLogEntry,
+  Communication,
   DashboardData,
   Donation,
   EventVolunteer,
@@ -133,6 +134,12 @@ interface AppContextValue {
   addRequest: (r: Omit<PrayerRequest, 'requestID'>) => Promise<PrayerRequest>
   updateRequest: (r: PrayerRequest) => Promise<void>
   deleteRequest: (id: string) => Promise<void>
+
+  communications: Communication[]
+  addCommunication: (c: Omit<Communication, 'communicationID'>) => Promise<Communication>
+  updateCommunication: (c: Communication) => Promise<void>
+  deleteCommunication: (id: string) => Promise<void>
+  sendDonorEmail: (to: string, subject: string, body: string) => Promise<{ sent: boolean; to: string; sentAt: string }>
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -154,6 +161,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<TempleEvent[]>([])
   const [eventVolunteers, setEventVolunteers] = useState<EventVolunteer[]>([])
   const [requests, setRequests] = useState<PrayerRequest[]>([])
+  const [communications, setCommunications] = useState<Communication[]>([])
   const [settings, setSettings] = useState<Settings>({
     templeName: 'ISKCON New Temple',
     templeAddress: '',
@@ -177,7 +185,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshAll(): Promise<void> {
-    const [u, p, d, e, v, pr, pp, ac, t, s, ann, ev, vols, req] = await Promise.all([
+    const [u, p, d, e, v, pr, pp, ac, t, s, ann, ev, vols, req, comm] = await Promise.all([
       dataService.getUsers(),
       dataService.getPeople(),
       dataService.getDonations(),
@@ -192,6 +200,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dataService.getEvents(),
       dataService.getEventVolunteers(),
       dataService.getRequests(),
+      dataService.getCommunications(),
     ])
     setUsers(u)
     setPeople(p)
@@ -207,6 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setEvents(ev)
     setEventVolunteers(vols)
     setRequests(req)
+    setCommunications(comm)
     if (user) {
       try {
         setMessages(await dataService.getMessages(user.email))
@@ -1213,6 +1223,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // ---- Donor Care: communication log + email ----
+  async function addCommunication(c: Omit<Communication, 'communicationID'>): Promise<Communication> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('communications', 'create', { ...c })) as Communication
+        notify('success', 'Communication logged')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
+    const id = `COM-${String(nextSeq()).padStart(4, '0')}`
+    const comm: Communication = { ...c, communicationID: id }
+    setCommunications((prev) => [comm, ...prev])
+    audit('Create', 'Donor Care', id)
+    return comm
+  }
+  async function updateCommunication(c: Communication): Promise<void> {
+    setCommunications((prev) => prev.map((x) => (x.communicationID === c.communicationID ? { ...x, ...c } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('communications', 'update', c)
+        notify('success', 'Communication updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Donor Care', c.communicationID)
+    }
+  }
+  async function deleteCommunication(id: string): Promise<void> {
+    setCommunications((prev) => prev.filter((x) => x.communicationID !== id))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('communications', 'hardDelete', { communicationID: id })
+        notify('success', 'Communication deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Donor Care', id)
+    }
+  }
+
+  async function sendDonorEmail(to: string, subject: string, body: string): Promise<{ sent: boolean; to: string; sentAt: string }> {
+    return dataService.sendDonorEmail(to, subject, body)
+  }
+
   const value: AppContextValue = {
     user,
     login,
@@ -1282,6 +1349,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addRequest,
     updateRequest,
     deleteRequest,
+    communications,
+    addCommunication,
+    updateCommunication,
+    deleteCommunication,
+    sendDonorEmail,
   }
 
   return (

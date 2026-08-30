@@ -2,6 +2,7 @@ import type {
   Account,
   Announcement,
   AuditLogEntry,
+  Communication,
   DashboardData,
   Donation,
   EventVolunteer,
@@ -44,13 +45,13 @@ const baseExpenses: Expense[] = [
 ]
 
 const basePeople: Person[] = [
-  { personID: 'PER-0001', name: 'Radha Krishna Das', phone: '9845012345', email: 'rkdas@example.com', address: '12 Main Road', city: 'Bengaluru', personType: ['Donor', 'Devotee'], joinDate: '2025-11-01', status: 'active', notes: 'Major donor, temple committee member' },
-  { personID: 'PER-0002', name: 'Madhumati Devi Dasi', phone: '9987654321', email: 'madhumati@example.com', address: '45 Lake View', city: 'Mysuru', personType: ['Donor', 'Devotee'], joinDate: '2025-11-15', status: 'active', notes: '' },
-  { personID: 'PER-0003', name: 'Gopal Charan Das', phone: '9012345678', email: 'gopal@example.com', address: '3 Temple Street', city: 'Hubli', personType: ['Donor', 'Committee Member'], joinDate: '2025-12-03', status: 'active', notes: '' },
-  { personID: 'PER-0004', name: 'Shyamasundar Devotee', phone: '9345678901', email: 'shyama@example.com', address: '7 Green Park', city: 'Bengaluru', personType: ['Donor', 'Volunteer'], joinDate: '2025-12-10', status: 'active', notes: '' },
-  { personID: 'PER-0005', name: 'Narayanan Murthy', phone: '9441122334', email: 'narayanan@example.com', address: '22 Residency Road', city: 'Bengaluru', personType: ['Donor'], joinDate: '2026-01-20', status: 'active', notes: 'Cow protection enthusiast' },
-  { personID: 'PER-0006', name: 'Amit Patel', phone: '9765432109', email: 'amit@example.com', address: '88 Diamond Colony', city: 'Ahmedabad', personType: ['Donor'], joinDate: '2026-02-05', status: 'active', notes: '' },
-  { personID: 'PER-0007', name: 'Lakshmi Narasimha', phone: '9638527410', email: 'ln@example.com', address: '4 Lake Road', city: 'Chennai', personType: ['Donor', 'Volunteer'], joinDate: '2026-03-18', status: 'active', notes: '' },
+  { personID: 'PER-0001', name: 'Radha Krishna Das', phone: '9845012345', email: 'rkdas@example.com', address: '12 Main Road', city: 'Bengaluru', personType: ['Donor', 'Devotee'], joinDate: '2025-11-01', status: 'active', notes: 'Major donor, temple committee member', birthday: '1968-10-21', anniversary: '1990-12-12', preferredChannel: 'WhatsApp' },
+  { personID: 'PER-0002', name: 'Madhumati Devi Dasi', phone: '9987654321', email: 'madhumati@example.com', address: '45 Lake View', city: 'Mysuru', personType: ['Donor', 'Devotee'], joinDate: '2025-11-15', status: 'active', notes: '', birthday: '1972-09-15', preferredChannel: 'Email' },
+  { personID: 'PER-0003', name: 'Gopal Charan Das', phone: '9012345678', email: 'gopal@example.com', address: '3 Temple Street', city: 'Hubli', personType: ['Donor', 'Committee Member'], joinDate: '2025-12-03', status: 'active', notes: '', birthday: '1960-08-30', preferredChannel: 'Call' },
+  { personID: 'PER-0004', name: 'Shyamasundar Devotee', phone: '9345678901', email: 'shyama@example.com', address: '7 Green Park', city: 'Bengaluru', personType: ['Donor', 'Volunteer'], joinDate: '2025-12-10', status: 'active', notes: '', birthday: '1985-11-11' },
+  { personID: 'PER-0005', name: 'Narayanan Murthy', phone: '9441122334', email: 'narayanan@example.com', address: '22 Residency Road', city: 'Bengaluru', personType: ['Donor'], joinDate: '2026-01-20', status: 'active', notes: 'Cow protection enthusiast', birthday: '1965-08-30', preferredChannel: 'WhatsApp' },
+  { personID: 'PER-0006', name: 'Amit Patel', phone: '9765432109', email: 'amit@example.com', address: '88 Diamond Colony', city: 'Ahmedabad', personType: ['Donor'], joinDate: '2026-02-05', status: 'active', notes: '', preferredChannel: 'SMS' },
+  { personID: 'PER-0007', name: 'Lakshmi Narasimha', phone: '9638527410', email: 'ln@example.com', address: '4 Lake Road', city: 'Chennai', personType: ['Donor', 'Volunteer'], joinDate: '2026-03-18', status: 'active', notes: '', birthday: '1978-08-02' },
   { personID: 'PER-0008', name: 'Sita Devi', phone: '9876543210', email: 'sita@example.com', address: '15 Lotus Lane', city: 'Bengaluru', personType: ['Donor'], joinDate: '2026-04-22', status: 'active', notes: '' },
   { personID: 'PER-0009', name: 'Ramesh Kumar', phone: '9123456780', email: 'ramesh@example.com', address: 'Site Colony', city: 'Hubli', personType: ['Employee'], joinDate: '2025-12-01', status: 'active', notes: 'Site manager' },
   { personID: 'PER-0010', name: 'Suresh Patil', phone: '9456781230', email: 'suresh@example.com', address: 'Village Road', city: 'Hubli', personType: ['Construction Worker', 'Contractor'], joinDate: '2026-01-02', status: 'active', notes: 'Head mason' },
@@ -144,8 +145,13 @@ const baseEventVolunteers: EventVolunteer[] = [
 
 const baseRequests: PrayerRequest[] = [
   { requestID: 'REQ-0001', date: '2026-08-25', personID: 'PER-0005', personName: 'Narayanan Murthy', type: 'Seva Request', description: 'Requesting to sponsor daily cow feeding for one year.', assignedTo: 'Temple Administrator', status: 'open', notes: '' },
-  { requestID: 'REQ-0002', date: '2026-08-27', personID: 'PER-0002', personName: 'Madhumati Devi Dasi', type: 'Prayer Request', description: 'Prayer for late husband\u2019s shraddha ceremony arrangements.', assignedTo: '', status: 'open', notes: '' },
+  { requestID: 'REQ-0002', date: '2026-08-27', personID: 'PER-0002', personName: 'Madhumati Devi Dasi', type: 'Prayer Request', description: 'Prayer for late husband’s shraddha ceremony arrangements.', assignedTo: '', status: 'open', notes: '' },
   { requestID: 'REQ-0003', date: '2026-08-28', personID: 'PER-0008', personName: 'Sita Devi', type: 'Assistance', description: 'Needs help reaching temple for the Sunday feast.', assignedTo: 'Projects Manager', status: 'in-progress', notes: 'Arranged pickup with volunteer' },
+]
+
+const baseCommunications: Communication[] = [
+  { communicationID: 'COM-0001', personID: 'PER-0003', donorName: 'Gopal Charan Das', date: '2026-08-20', channel: 'WhatsApp', type: 'Thank You', subject: 'Thank you for your donation', message: 'Dear Gopal Charan Das, thank you for your generous donation of ₹40,000. Hare Krishna!', sentBy: 'Temple Administrator', status: 'Sent' },
+  { communicationID: 'COM-0002', personID: 'PER-0002', donorName: 'Madhumati Devi Dasi', date: '2026-09-15', channel: 'Email', type: 'Birthday Wish', subject: 'Happy Birthday from ISKCON New Temple', message: 'Dear Madhumati Devi Dasi, wishing you a very happy birthday!', sentBy: 'Chief Accountant', status: 'Done' },
 ]
 
 export const mockData = {
@@ -165,6 +171,7 @@ export const mockData = {
   events: baseEvents,
   eventVolunteers: baseEventVolunteers,
   requests: baseRequests,
+  communications: baseCommunications,
 }
 
 export function buildDashboardData(

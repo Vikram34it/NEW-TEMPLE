@@ -21,6 +21,22 @@ export interface Person {
   joinDate: string
   status: 'active' | 'inactive'
   notes: string
+  birthday?: string
+  anniversary?: string
+  preferredChannel?: string
+}
+
+export interface Communication {
+  communicationID: string
+  personID: string
+  donorName: string
+  date: string
+  channel: string
+  type: string
+  subject: string
+  message: string
+  sentBy: string
+  status: string
 }
 
 export interface Donation {

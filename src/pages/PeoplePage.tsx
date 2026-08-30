@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, Eye, Phone, Mail, MapPin, HandCoins, Receipt, Upload } from 'lucide-react'
+import { Plus, Pencil, Trash2, Eye, Phone, Mail, MapPin, HandCoins, Receipt, Upload, CalendarHeart, Gift, MessageCircle } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Modal, Badge, PageHeader, Field, Input, Select, Textarea } from '../components/ui'
 import { BulkUploadModal, type ImportColumn } from '../components/BulkUploadModal'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { formatCurrency, formatDate } from '../utils/helpers'
-import { PERSON_TYPES } from '../utils/constants'
+import { PERSON_TYPES, PERSON_CHANNELS } from '../utils/constants'
 import type { Person } from '../types'
 
 const PERSON_IMPORT_COLUMNS: ImportColumn[] = [
@@ -18,11 +18,14 @@ const PERSON_IMPORT_COLUMNS: ImportColumn[] = [
   { header: 'Role / Type', key: 'personType', type: 'stringArray' },
   { header: 'Join Date', key: 'joinDate', type: 'date' },
   { header: 'Status', key: 'status', options: ['active', 'inactive', 'Active', 'Inactive'] },
+  { header: 'Birthday', key: 'birthday', type: 'date' },
+  { header: 'Anniversary', key: 'anniversary', type: 'date' },
+  { header: 'Preferred Channel', key: 'preferredChannel', options: [...PERSON_CHANNELS] },
   { header: 'Notes', key: 'notes' },
 ]
 
 export function PeoplePage() {
-  const { people, donations, expenses, can, deletePerson, bulkAddPeople } = useApp()
+  const { people, donations, expenses, communications, can, deletePerson, bulkAddPeople } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editPerson, setEditPerson] = useState<Person | null>(null)
   const [viewPerson, setViewPerson] = useState<Person | null>(null)
@@ -43,6 +46,9 @@ export function PeoplePage() {
         personType: cleanTypes,
         joinDate: (r.joinDate as string) || new Date().toISOString().slice(0, 10),
         status: /inactive/i.test(String(r.status || 'active')) ? 'inactive' as const : 'active' as const,
+        birthday: (r.birthday as string) || undefined,
+        anniversary: (r.anniversary as string) || undefined,
+        preferredChannel: (r.preferredChannel as string) || undefined,
         notes: (r.notes as string) || '',
       }
     })
@@ -67,6 +73,9 @@ export function PeoplePage() {
     { header: 'City', accessor: (p: Person) => p.city },
     { header: 'Type', accessor: (p: Person) => p.personType.join(', ') },
     { header: 'Status', accessor: (p: Person) => p.status },
+    { header: 'Birthday', accessor: (p: Person) => p.birthday || '' },
+    { header: 'Anniversary', accessor: (p: Person) => p.anniversary || '' },
+    { header: 'Preferred Channel', accessor: (p: Person) => p.preferredChannel || '' },
   ]
 
   const columns: Column<Person>[] = [
@@ -145,7 +154,7 @@ export function PeoplePage() {
       </Modal>
 
       <Modal open={!!viewPerson} onClose={() => setViewPerson(null)} title="Person Profile" wide>
-        {viewPerson && <PersonProfile p={viewPerson} donations={donations} expenses={expenses} onClose={() => setViewPerson(null)} />}
+        {viewPerson && <PersonProfile p={viewPerson} donations={donations} expenses={expenses} communications={communications} onClose={() => setViewPerson(null)} />}
       </Modal>
     </div>
   )
@@ -256,6 +265,18 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
         </Field>
       </div>
 
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Birthday"><Input type="date" value={form.birthday} onChange={(e) => set('birthday', e.target.value as never)} /></Field>
+        <Field label="Anniversary"><Input type="date" value={form.anniversary} onChange={(e) => set('anniversary', e.target.value as never)} /></Field>
+      </div>
+
+      <Field label="Preferred Communication Channel">
+        <Select value={form.preferredChannel || ''} onChange={(e) => set('preferredChannel', e.target.value as never)}>
+          <option value="">Not set</option>
+          {PERSON_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </Select>
+      </Field>
+
       <Field label="Notes">
         <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value as never)} placeholder="Notes" />
       </Field>
@@ -268,15 +289,19 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
   )
 }
 
-function PersonProfile({ p, donations, expenses, onClose }: {
+function PersonProfile({ p, donations, expenses, communications, onClose }: {
   p: Person
   donations: import('../types').Donation[]
   expenses: import('../types').Expense[]
+  communications: import('../types').Communication[]
   onClose: () => void
 }) {
   const personDonations = donations.filter((d) => d.donorName.toLowerCase() === p.name.toLowerCase() || d.donorID === p.personID)
   const totalDonated = personDonations.reduce((s, d) => s + d.amount, 0)
   const personExpenses = expenses.filter((e) => e.vendorName.toLowerCase() === p.name.toLowerCase())
+  const personComms = communications.filter(
+    (c) => c.personID === p.personID || c.donorName.toLowerCase() === p.name.toLowerCase()
+  ).sort((a, b) => b.date.localeCompare(a.date))
 
   return (
     <div className="space-y-5">
@@ -300,6 +325,9 @@ function PersonProfile({ p, donations, expenses, onClose }: {
         <Info icon={<Mail size={14} />} label="Email" value={p.email || '—'} />
         <Info icon={<MapPin size={14} />} label="City" value={p.city || '—'} />
         <Info label="Joined" value={formatDate(p.joinDate)} />
+        <Info icon={<CalendarHeart size={14} />} label="Birthday" value={p.birthday ? formatDate(p.birthday) : '—'} />
+        <Info icon={<Gift size={14} />} label="Anniversary" value={p.anniversary ? formatDate(p.anniversary) : '—'} />
+        <Info icon={<MessageCircle size={14} />} label="Preferred Channel" value={p.preferredChannel || '—'} />
       </div>
       {p.address && <Info label="Address" value={p.address} />}
 
@@ -341,6 +369,25 @@ function PersonProfile({ p, donations, expenses, onClose }: {
           <p className="text-sm text-slate-600">{p.notes}</p>
         </div>
       )}
+
+      <div>
+        <p className="text-sm font-semibold text-slate-700 mb-2">Communication History</p>
+        {personComms.length === 0 ? (
+          <p className="text-sm text-slate-400">No logged messages yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {personComms.slice(0, 10).map((c) => (
+              <div key={c.communicationID} className="bg-slate-50 rounded-lg px-3 py-2 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-700 font-medium">{formatDate(c.date)} · {c.channel}</span>
+                  <Badge color={c.status === 'Sent' ? 'green' : 'slate'}>{c.status}</Badge>
+                </div>
+                <p className="text-slate-500 mt-0.5 truncate">{c.type}{c.subject ? ` — ${c.subject}` : ''}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex justify-end pt-2">
         <Button variant="ghost" onClick={onClose}>Close</Button>

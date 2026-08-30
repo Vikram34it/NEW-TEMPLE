@@ -11,6 +11,7 @@ import {
   TrendingDown,
   Plus,
   Pin,
+  Heart,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -38,7 +39,7 @@ const labelFmt = (label: unknown) => monthLabel(String(label))
 const PIE_COLORS = ['#f97316', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#6366f1']
 
 export function DashboardPage() {
-  const { dashboard, can, settings, announcements, events } = useApp()
+  const { dashboard, can, settings, announcements, events, people, donations, communications } = useApp()
   const [showDonation, setShowDonation] = useState(false)
   const [showExpense, setShowExpense] = useState(false)
 
@@ -165,6 +166,35 @@ export function DashboardPage() {
         </Card>
       </div>
 
+      {/* Donor Care */}
+      <Card>
+        <CardHeader
+          title="Donor Care"
+          subtitle="Keep your supporters close"
+          action={<Link to="/donor-care" className="text-xs text-orange-600 hover:underline font-medium">Open Donor Care</Link>}
+        />
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <DonorCareStat
+            label="Donors to Thank"
+            count={countToThank(donations, communications, people)}
+            detail="Recent donation, no thank-you yet"
+            to="/donor-care"
+          />
+          <DonorCareStat
+            label="Lapsed Donors"
+            count={countLapsed(donations, today)}
+            detail="No donation in 6+ months"
+            to="/donor-care"
+          />
+          <DonorCareStat
+            label="Occasions This Month"
+            count={countOccasions(people)}
+            detail="Birthdays & anniversaries"
+            to="/donor-care"
+          />
+        </div>
+      </Card>
+
       {/* Charts row 1 */}
       <div className="grid lg:grid-cols-2 gap-4">
         <Card>
@@ -275,5 +305,70 @@ export function DashboardPage() {
         <ExpenseForm onDone={() => setShowExpense(false)} />
       </Modal>
     </div>
+  )
+}
+
+function countToThank(
+  donations: import('../types').Donation[],
+  communications: import('../types').Communication[],
+  people: import('../types').Person[]
+): number {
+  const donors = people.filter((p) => p.personType.includes('Donor'))
+  const lastByKey = new Map<string, import('../types').Donation>()
+  for (const d of donations) {
+    const person = donors.find((p) => p.personID === d.donorID || p.name.toLowerCase() === String(d.donorName).toLowerCase())
+    const key = person ? person.personID : `name:${String(d.donorName).toLowerCase()}`
+    const prev = lastByKey.get(key)
+    if (!prev || d.date > prev.date) lastByKey.set(key, d)
+  }
+  let count = 0
+  for (const [key, last] of lastByKey) {
+    const thanked = communications.some(
+      (c) =>
+        (c.personID === key || String(c.donorName).toLowerCase() === String(last.donorName).toLowerCase()) &&
+        (c.type === 'Thank You' || c.type === 'Receipt') &&
+        String(c.date).slice(0, 10) >= last.date
+    )
+    if (!thanked) count++
+  }
+  return count
+}
+
+function countLapsed(donations: import('../types').Donation[], today: string): number {
+  const cutoff = new Date(today)
+  cutoff.setMonth(cutoff.getMonth() - 6)
+  const cutoffStr = cutoff.toISOString().slice(0, 10)
+  const last = new Map<string, string>()
+  for (const d of donations) {
+    const key = String(d.donorName).toLowerCase()
+    const prev = last.get(key)
+    if (!prev || d.date > prev) last.set(key, d.date)
+  }
+  return [...last.values()].filter((date) => date < cutoffStr).length
+}
+
+function countOccasions(people: import('../types').Person[]): number {
+  const month = todayStr().slice(5, 7)
+  return people.filter(
+    (p) => (p.birthday && p.birthday.slice(5, 7) === month) || (p.anniversary && p.anniversary.slice(5, 7) === month)
+  ).length
+}
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function DonorCareStat({ label, count, detail, to }: { label: string; count: number; detail: string; to: string }) {
+  return (
+    <Link to={to} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-orange-200 hover:bg-orange-50/40 transition-colors">
+      <div className="w-10 h-10 shrink-0 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+        <Heart size={18} />
+      </div>
+      <div>
+        <p className="text-lg font-bold text-slate-800 leading-none">{count}</p>
+        <p className="text-xs font-medium text-slate-600 mt-1">{label}</p>
+        <p className="text-[11px] text-slate-400">{detail}</p>
+      </div>
+    </Link>
   )
 }

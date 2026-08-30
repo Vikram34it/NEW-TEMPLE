@@ -50,6 +50,15 @@ export function accountNameForPaymentMethod(method: string, accounts: Account[])
   return acc?.accountName || accounts[0]?.accountName || 'Main Bank Account'
 }
 
+// Replace {Token} placeholders in a message with values (keys are the token
+// names, e.g. { Name: 'Ram', Amount: '5000' }).
+export function fillTemplate(text: string, values: Record<string, string | number>): string {
+  return String(text).replace(/\{(\w+)\}/g, (_, key) => {
+    const v = values[key]
+    return v === undefined || v === null ? '' : String(v)
+  })
+}
+
 export function getCurrentYear(): number {
   return new Date().getFullYear()
 }
