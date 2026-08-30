@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Upload, Download, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
 import { Button, Modal } from './ui'
+import { parseDateInput } from '../utils/helpers'
 
 export interface ImportColumn {
   header: string
@@ -8,6 +9,7 @@ export interface ImportColumn {
   required?: boolean
   type?: 'string' | 'number' | 'date' | 'stringArray' | 'boolean'
   options?: string[]
+  example?: string
 }
 
 interface ParsedRow {
@@ -66,7 +68,14 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
 
   const downloadTemplate = () => {
     const escape = (s: string) => (/[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
-    const content = headers.map(escape).join(',')
+    const headerLine = headers.map(escape).join(',')
+    // Build a helpful example row from supplied examples/options so CSV editors
+    // show the exact values to type (dropdown-like guidance).
+    const exampleLine = columns
+      .map((c) => c.example ?? (c.options && c.options.length ? c.options[0] : ''))
+      .map(escape)
+      .join(',')
+    const content = [headerLine, exampleLine].join('\n')
     const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -115,7 +124,7 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
           if (col.required && !raw) errors.push(`${col.header} is required`)
           if (!raw) return
           if (col.type === 'number' && isNaN(Number(raw))) errors.push(`${col.header} must be a number`)
-          if (col.type === 'date' && isNaN(new Date(raw).getTime())) errors.push(`${col.header} must be a valid date`)
+          if (col.type === 'date' && !parseDateInput(raw)) errors.push(`${col.header} must be a valid date (dd-mm-yyyy or yyyy-mm-dd)`)
           if (col.options && col.options.length > 0 && !col.options.includes(raw)) {
             errors.push(`${col.header} must be one of: ${col.options.join(', ')}`)
           }
@@ -201,6 +210,20 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
       ) : (
         <div className="space-y-4">
           {description && <p className="text-sm text-slate-500">{description}</p>}
+
+          {(columns.some((c) => c.options && c.options.length > 0)) && (
+            <div className="text-xs bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800">
+              <p className="font-semibold mb-1">Allowed values for dropdown columns:</p>
+              <ul className="space-y-0.5">
+                {columns.filter((c) => c.options && c.options.length > 0).map((c) => (
+                  <li key={c.key}>
+                    <span className="font-medium">{c.header}:</span>{' '}
+                    {c.options!.slice(0, 12).join(', ')}{c.options!.length > 12 ? '…' : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <label className="flex-1 min-w-[220px] cursor-pointer">

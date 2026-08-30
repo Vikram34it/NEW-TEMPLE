@@ -42,6 +42,33 @@ export function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Accepts ISO (yyyy-mm-dd) or Indian (dd-mm-yyyy) dates and returns a
+// normalised yyyy-mm-dd string, or '' if not a valid date.
+export function parseDateInput(raw: string): string {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  const m = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (m) {
+    const y = +m[1], mo = +m[2], d = +m[3]
+    if (isValidDate_(y, mo, d)) return padDate_(y, mo, d)
+  }
+  const dm = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+  if (dm) {
+    const d = +dm[1], mo = +dm[2], y = +dm[3]
+    if (isValidDate_(y, mo, d)) return padDate_(y, mo, d)
+  }
+  return ''
+}
+
+function isValidDate_(y: number, mo: number, d: number): boolean {
+  const dt = new Date(y, mo - 1, d)
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d
+}
+
+function padDate_(y: number, mo: number, d: number): string {
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
 // Cash payments go to the cash account; everything else (UPI, bank transfer,
 // cheque, card, other) goes to the bank account.
 export function accountNameForPaymentMethod(method: string, accounts: Account[]): string {

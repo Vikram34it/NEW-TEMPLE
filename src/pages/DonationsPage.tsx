@@ -7,30 +7,30 @@ import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ReceiptModal } from '../components/ReceiptModal'
-import { formatCurrency, formatDate } from '../utils/helpers'
+import { formatCurrency, formatDate, parseDateInput } from '../utils/helpers'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../utils/constants'
 import type { Donation } from '../types'
 
-const DONATION_IMPORT_COLUMNS: ImportColumn[] = [
-  { header: 'Date', key: 'date', required: true, type: 'date' },
-  { header: 'Donor Name', key: 'donorName', required: true },
-  { header: 'Amount', key: 'amount', required: true, type: 'number' },
-  { header: 'Phone', key: 'phone' },
-  { header: 'Email', key: 'email' },
-  { header: 'Address', key: 'address' },
-  { header: 'Category', key: 'category', options: [...DONATION_CATEGORIES] },
-  { header: 'Purpose', key: 'purpose' },
-  { header: 'Payment Method', key: 'paymentMethod', options: [...PAYMENT_METHODS] },
-  { header: 'Transaction Reference', key: 'transactionReference' },
-  { header: 'Received By', key: 'receivedBy' },
-  { header: 'PAN Number', key: 'panNumber' },
-  { header: 'Aadhaar Number', key: 'aadhaarNumber' },
-  { header: '80G Needed', key: 'need80G', options: ['Yes', 'No', 'TRUE', 'FALSE', 'true', 'false'] },
-  { header: 'Notes', key: 'notes' },
+const buildImportColumns = (donorNames: string[]): ImportColumn[] => [
+  { header: 'Date', key: 'date', required: true, type: 'date', example: '31-12-2026' },
+  { header: 'Donor Name', key: 'donorName', required: true, options: donorNames.length ? donorNames : undefined, example: donorNames[0] || 'Radha Krishna Das' },
+  { header: 'Amount', key: 'amount', required: true, type: 'number', example: '5000' },
+  { header: 'Phone', key: 'phone', example: '9845012345' },
+  { header: 'Email', key: 'email', example: 'donor@example.com' },
+  { header: 'Address', key: 'address', example: '12 Main Road, Bengaluru' },
+  { header: 'Category', key: 'category', options: [...DONATION_CATEGORIES], example: DONATION_CATEGORIES[0] },
+  { header: 'Purpose', key: 'purpose', example: 'Temple construction' },
+  { header: 'Payment Method', key: 'paymentMethod', options: [...PAYMENT_METHODS], example: PAYMENT_METHODS[0] },
+  { header: 'Transaction Reference', key: 'transactionReference', example: 'UPI1234567890' },
+  { header: 'Received By', key: 'receivedBy', example: 'Temple Administrator' },
+  { header: 'PAN Number', key: 'panNumber', example: 'ABCDE1234F' },
+  { header: 'Aadhaar Number', key: 'aadhaarNumber', example: '123456789012' },
+  { header: '80G Needed', key: 'need80G', options: ['Yes', 'No'], example: 'Yes' },
+  { header: 'Notes', key: 'notes', example: '' },
 ]
 
 export function DonationsPage() {
-  const { donations, can, softDeleteDonation, bulkAddDonations, settings } = useApp()
+  const { donations, can, softDeleteDonation, bulkAddDonations, settings, people } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editDonation, setEditDonation] = useState<Donation | null>(null)
   const [viewDonation, setViewDonation] = useState<Donation | null>(null)
@@ -41,9 +41,18 @@ export function DonationsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
+  const donorNames = useMemo(() => {
+    const names = new Set<string>()
+    people.forEach((p) => { if (p.personType.includes('Donor') || p.name) names.add(p.name) })
+    donations.forEach((d) => { if (d.donorName) names.add(d.donorName) })
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [people, donations])
+
+  const importColumns = useMemo(() => buildImportColumns(donorNames), [donorNames])
+
   const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
     const items = rows.map((r) => ({
-      date: r.date as string,
+      date: parseDateInput(String(r.date || '')) || new Date().toISOString().slice(0, 10),
       donorID: (r.donorID as string) || '',
       donorName: (r.donorName as string) || 'Unknown',
       phone: (r.phone as string) || '',
@@ -184,8 +193,8 @@ export function DonationsPage() {
         open={showBulk}
         onClose={() => setShowBulk(false)}
         title="Import Donations"
-        description="Upload a CSV of donations. Use the template to match the columns exactly. Date should be YYYY-MM-DD and Amount a number."
-        columns={DONATION_IMPORT_COLUMNS}
+        description={`Upload a CSV of donations, then match the columns below. Date can be dd-mm-yyyy or yyyy-mm-dd. For dropdown columns (Donor Name, Category, Payment Method, 80G), use one of the listed values — the uploaded donor names are already on the list; paste a new one in the Donor Name column to add it.`}
+        columns={importColumns}
         onImport={handleBulkImport}
         onImported={() => setShowBulk(false)}
       />
