@@ -13,6 +13,10 @@ import { AccountsPage } from './pages/AccountsPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { AnnouncementsPage } from './pages/AnnouncementsPage'
+import { MessagesPage } from './pages/MessagesPage'
+import { EventsPage } from './pages/EventsPage'
+import { RequestsPage } from './pages/RequestsPage'
 
 export default function App() {
   return (
@@ -32,6 +36,10 @@ export default function App() {
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/announcements" element={<AnnouncementsPage />} />
+            <Route path="/messages" element={<MessagesPage />} />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/requests" element={<RequestsPage />} />
             <Route path="*" element={<DashboardPage />} />
           </Route>
         </Routes>

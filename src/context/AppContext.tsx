@@ -5,14 +5,19 @@ import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
 import type {
   Account,
+  Announcement,
   AuditLogEntry,
   DashboardData,
   Donation,
+  EventVolunteer,
   Expense,
+  Message,
   PendingPayment,
   Person,
+  PrayerRequest,
   Project,
   Settings,
+  TempleEvent,
   Transaction,
   User,
   Vendor,
@@ -63,6 +68,16 @@ interface AppContextValue {
   auditLog: AuditLogEntry[]
   dashboard: DashboardData
 
+  announcements: Announcement[]
+  messages: Message[]
+  events: TempleEvent[]
+  eventVolunteers: EventVolunteer[]
+  requests: PrayerRequest[]
+  unreadMessages: Message[]
+
+  refreshMessages: () => Promise<void>
+  setMessagesPolling: (active: boolean) => void
+
   addDonation: (d: Omit<Donation, 'donationID' | 'receiptNumber'>) => Promise<Donation>
   updateDonation: (d: Donation) => Promise<void>
   softDeleteDonation: (id: string) => Promise<void>
@@ -97,6 +112,26 @@ interface AppContextValue {
   deleteUser: (id: string) => Promise<void>
 
   addTransaction: (t: Omit<Transaction, 'transactionID'>) => Promise<Transaction>
+
+  addAnnouncement: (a: Omit<Announcement, 'announcementID' | 'postedAt' | 'postedBy'>) => Promise<Announcement>
+  updateAnnouncement: (a: Announcement) => Promise<void>
+  archiveAnnouncement: (id: string) => Promise<void>
+
+  sendMessage: (m: Pick<Message, 'recipientEmail' | 'subject' | 'body'>) => Promise<Message>
+  markMessageRead: (id: string) => Promise<void>
+  deleteMessage: (id: string, side: 'sender' | 'recipient') => Promise<void>
+
+  addEvent: (e: Omit<TempleEvent, 'eventID'>) => Promise<TempleEvent>
+  updateEvent: (e: TempleEvent) => Promise<void>
+  deleteEvent: (id: string) => Promise<void>
+
+  addVolunteer: (v: Omit<EventVolunteer, 'volunteerID' | 'registeredAt'>) => Promise<EventVolunteer>
+  updateVolunteer: (v: EventVolunteer) => Promise<void>
+  removeVolunteer: (id: string) => Promise<void>
+
+  addRequest: (r: Omit<PrayerRequest, 'requestID'>) => Promise<PrayerRequest>
+  updateRequest: (r: PrayerRequest) => Promise<void>
+  deleteRequest: (id: string) => Promise<void>
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -113,6 +148,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([])
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
+  const [events, setEvents] = useState<TempleEvent[]>([])
+  const [eventVolunteers, setEventVolunteers] = useState<EventVolunteer[]>([])
+  const [requests, setRequests] = useState<PrayerRequest[]>([])
   const [settings, setSettings] = useState<Settings>({
     templeName: 'ISKCON New Temple',
     templeAddress: '',
@@ -125,6 +165,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [messagesPolling, setMessagesPolling] = useState(false)
 
   const notify = (type: 'success' | 'error', message: string) => {
     const id = ++toastSeq
@@ -135,7 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshAll(): Promise<void> {
-    const [u, p, d, e, v, pr, pp, ac, t, s] = await Promise.all([
+    const [u, p, d, e, v, pr, pp, ac, t, s, ann, ev, vols, req] = await Promise.all([
       dataService.getUsers(),
       dataService.getPeople(),
       dataService.getDonations(),
@@ -146,6 +187,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dataService.getAccounts(),
       dataService.getTransactions(),
       dataService.getSettings(),
+      dataService.getAnnouncements(),
+      dataService.getEvents(),
+      dataService.getEventVolunteers(),
+      dataService.getRequests(),
     ])
     setUsers(u)
     setPeople(p)
@@ -157,6 +202,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAccounts(ac)
     setTransactions(t)
     setSettings(s)
+    setAnnouncements(ann)
+    setEvents(ev)
+    setEventVolunteers(vols)
+    setRequests(req)
+    if (user) {
+      try {
+        setMessages(await dataService.getMessages(user.email))
+      } catch {
+        // message load is best-effort; never block the rest of the app
+      }
+    }
     const dash = await dataService.getDashboard()
     setDashboard(dash)
   }
@@ -185,6 +241,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Load (or clear) the mailbox whenever the logged-in user changes.
+  useEffect(() => {
+    if (user) {
+      dataService
+        .getMessages(user.email)
+        .then(setMessages)
+        .catch(() => {})
+    } else {
+      setMessages([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.email])
+
+  // 60s auto-refresh of the mailbox while the Messages page is open.
+  useEffect(() => {
+    if (!CONFIG_USE_LIVE || !user || !messagesPolling) return
+    const t = window.setInterval(() => {
+      dataService.getMessages(user.email).then(setMessages).catch(() => {})
+    }, 60000)
+    return () => window.clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [CONFIG_USE_LIVE, user?.email, messagesPolling])
 
   const audit = (action: string, module: string, recordID: string, newValue = '') => {
     if (!user) return
@@ -757,6 +836,305 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function refreshMessages(): Promise<void> {
+    if (!user) return
+    try {
+      setMessages(await dataService.getMessages(user.email))
+    } catch (err) {
+      notify('error', errMsg(err))
+    }
+  }
+
+  const unreadMessages = messages.filter(
+    (m) => user && m.recipientEmail.toLowerCase() === user.email.toLowerCase() && !m.read
+  )
+
+  // ---- Announcements ----
+  async function addAnnouncement(a: Omit<Announcement, 'announcementID' | 'postedAt' | 'postedBy'>): Promise<Announcement> {
+    const record = { ...a, postedBy: user?.name || '' }
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('announcements', 'create', record)) as Announcement
+        notify('success', 'Announcement posted')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
+    const ann: Announcement = {
+      ...record,
+      announcementID: `ANN-${String(nextSeq()).padStart(4, '0')}`,
+      postedAt: new Date().toISOString(),
+    }
+    setAnnouncements((prev) => [ann, ...prev])
+    audit('Create', 'Announcements', ann.announcementID)
+    return ann
+  }
+  async function updateAnnouncement(a: Announcement): Promise<void> {
+    setAnnouncements((prev) => prev.map((x) => (x.announcementID === a.announcementID ? { ...x, ...a } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('announcements', 'update', a)
+        notify('success', 'Announcement updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Announcements', a.announcementID)
+    }
+  }
+  async function archiveAnnouncement(id: string): Promise<void> {
+    setAnnouncements((prev) => prev.map((x) => (x.announcementID === id ? { ...x, status: 'archived' } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('announcements', 'softDelete', { announcementID: id })
+        notify('success', 'Announcement archived')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Archive', 'Announcements', id)
+    }
+  }
+
+  // ---- Messages ----
+  async function sendMessage(m: Pick<Message, 'recipientEmail' | 'subject' | 'body'>): Promise<Message> {
+    if (!user) throw new Error('Not logged in')
+    const record: Message = {
+      messageID: '',
+      senderEmail: user.email,
+      senderName: user.name,
+      recipientEmail: m.recipientEmail.trim(),
+      subject: m.subject.trim(),
+      body: m.body.trim(),
+      sentAt: '',
+      read: false,
+      readAt: '',
+    }
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('messages', 'create', record)) as Message
+        notify('success', 'Message sent')
+        await refreshMessages()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshMessages()
+        throw err
+      }
+    }
+    const msg: Message = {
+      ...record,
+      messageID: `MSG-${String(nextSeq()).padStart(4, '0')}`,
+      sentAt: new Date().toISOString(),
+    }
+    setMessages((prev) => [msg, ...prev])
+    audit('Send', 'Messages', msg.messageID)
+    return msg
+  }
+  async function markMessageRead(id: string): Promise<void> {
+    const target = messages.find((m) => m.messageID === id)
+    if (!target || target.read) return
+    setMessages((prev) => prev.map((m) => (m.messageID === id ? { ...m, read: true, readAt: new Date().toISOString() } : m)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.markMessageRead(id)
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshMessages()
+        throw err
+      }
+    } else {
+      audit('Read', 'Messages', id)
+    }
+  }
+  async function deleteMessage(id: string, side: 'sender' | 'recipient'): Promise<void> {
+    setMessages((prev) => prev.filter((m) => m.messageID !== id))
+    if (CONFIG_USE_LIVE) {
+      try {
+        if (!user) throw new Error('Not logged in')
+        await dataService.deleteMessage(id, user.email, side)
+        notify('success', 'Message deleted')
+        await refreshMessages()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshMessages()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Messages', id, user?.email || '')
+    }
+  }
+
+  // ---- Events ----
+  async function addEvent(e: Omit<TempleEvent, 'eventID'>): Promise<TempleEvent> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('events', 'create', { ...e })) as TempleEvent
+        notify('success', 'Event created')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
+    const ev: TempleEvent = { ...e, eventID: `EVT-${String(nextSeq()).padStart(4, '0')}` }
+    setEvents((prev) => [ev, ...prev])
+    audit('Create', 'Events', ev.eventID)
+    return ev
+  }
+  async function updateEvent(e: TempleEvent): Promise<void> {
+    setEvents((prev) => prev.map((x) => (x.eventID === e.eventID ? { ...x, ...e } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('events', 'update', e)
+        notify('success', 'Event updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Events', e.eventID)
+    }
+  }
+  async function deleteEvent(id: string): Promise<void> {
+    setEvents((prev) => prev.filter((x) => x.eventID !== id))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('events', 'hardDelete', { eventID: id })
+        notify('success', 'Event deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Events', id)
+    }
+  }
+
+  // ---- Event Volunteers ----
+  async function addVolunteer(v: Omit<EventVolunteer, 'volunteerID' | 'registeredAt'>): Promise<EventVolunteer> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('eventVolunteers', 'create', { ...v })) as EventVolunteer
+        notify('success', 'Volunteer registered')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
+    const vol: EventVolunteer = {
+      ...v,
+      volunteerID: `VOL-${String(nextSeq()).padStart(4, '0')}`,
+      registeredAt: new Date().toISOString(),
+    }
+    setEventVolunteers((prev) => [...prev, vol])
+    audit('Create', 'Event Volunteers', vol.volunteerID)
+    return vol
+  }
+  async function updateVolunteer(v: EventVolunteer): Promise<void> {
+    setEventVolunteers((prev) => prev.map((x) => (x.volunteerID === v.volunteerID ? { ...x, ...v } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('eventVolunteers', 'update', v)
+        notify('success', 'Volunteer updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Event Volunteers', v.volunteerID)
+    }
+  }
+  async function removeVolunteer(id: string): Promise<void> {
+    setEventVolunteers((prev) => prev.filter((x) => x.volunteerID !== id))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('eventVolunteers', 'hardDelete', { volunteerID: id })
+        notify('success', 'Volunteer removed')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Event Volunteers', id)
+    }
+  }
+
+  // ---- Requests ----
+  async function addRequest(r: Omit<PrayerRequest, 'requestID'>): Promise<PrayerRequest> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('requests', 'create', { ...r })) as PrayerRequest
+        notify('success', 'Request recorded')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
+    const req: PrayerRequest = { ...r, requestID: `REQ-${String(nextSeq()).padStart(4, '0')}` }
+    setRequests((prev) => [req, ...prev])
+    audit('Create', 'Requests', req.requestID)
+    return req
+  }
+  async function updateRequest(r: PrayerRequest): Promise<void> {
+    setRequests((prev) => prev.map((x) => (x.requestID === r.requestID ? { ...x, ...r } : x)))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('requests', 'update', r)
+        notify('success', 'Request updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Requests', r.requestID)
+    }
+  }
+  async function deleteRequest(id: string): Promise<void> {
+    setRequests((prev) => prev.filter((x) => x.requestID !== id))
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('requests', 'hardDelete', { requestID: id })
+        notify('success', 'Request deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Requests', id)
+    }
+  }
+
   const value: AppContextValue = {
     user,
     login,
@@ -777,6 +1155,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     users,
     auditLog,
     dashboard: dashboard as DashboardData,
+    announcements,
+    messages,
+    events,
+    eventVolunteers,
+    requests,
+    unreadMessages,
+    refreshMessages,
+    setMessagesPolling,
     addDonation,
     updateDonation,
     softDeleteDonation,
@@ -803,6 +1189,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateUser,
     deleteUser,
     addTransaction,
+    addAnnouncement,
+    updateAnnouncement,
+    archiveAnnouncement,
+    sendMessage,
+    markMessageRead,
+    deleteMessage,
+    addEvent,
+    updateEvent,
+    deleteEvent,
+    addVolunteer,
+    updateVolunteer,
+    removeVolunteer,
+    addRequest,
+    updateRequest,
+    deleteRequest,
   }
 
   return (

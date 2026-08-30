@@ -23,6 +23,19 @@ export function formatDate(dateString: string): string {
   })
 }
 
+export function formatDateTime(dateString: string): string {
+  if (!dateString) return '—'
+  const d = new Date(dateString)
+  if (isNaN(d.getTime())) return dateString
+  return d.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
@@ -88,4 +101,45 @@ export function debounce<T extends (...args: never[]) => void>(fn: T, ms: number
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => fn(...args), ms)
   }
+}
+
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+
+function twoDigits(n: number): string {
+  if (n === 0) return ''
+  if (n < 20) return ONES[n]
+  return `${TENS[Math.floor(n / 10)]}${n % 10 ? ' ' + ONES[n % 10] : ''}`
+}
+
+// Converts an amount to English words using the Indian numbering system
+// (lakh / crore). E.g. 1234567 -> "Twelve Lakh Thirty Four Thousand Five Hundred Sixty Seven".
+export function amountInWords(amount: number): string {
+  let n = Math.floor(Math.abs(amount))
+  const paise = Math.round((Math.abs(amount) - Math.floor(Math.abs(amount))) * 100)
+  if (n === 0 && paise === 0) return 'Zero Rupees'
+
+  const crore = Math.floor(n / 10000000)
+  n %= 10000000
+  const lakh = Math.floor(n / 100000)
+  n %= 100000
+  const thousand = Math.floor(n / 1000)
+  n %= 1000
+  const hundred = Math.floor(n / 100)
+  const rest = n % 100
+
+  const parts: string[] = []
+  if (crore) parts.push(`${twoDigits(crore)} Crore`)
+  if (lakh) parts.push(`${twoDigits(lakh)} Lakh`)
+  if (thousand) parts.push(`${twoDigits(thousand)} Thousand`)
+  if (hundred) parts.push(`${ONES[hundred]} Hundred`)
+  if (rest) parts.push(twoDigits(rest))
+  let words = parts.join(' ')
+  if (!words) words = 'Zero'
+  let result = `${words} Rupees`
+  if (paise > 0) {
+    result += ` and ${twoDigits(paise)} ${paise === 1 ? 'Paise' : 'Paise'}`
+  }
+  if (amount < 0) result = 'Minus ' + result
+  return result
 }

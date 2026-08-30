@@ -1,13 +1,18 @@
 import type {
   Account,
+  Announcement,
   AuditLogEntry,
   DashboardData,
   Donation,
+  EventVolunteer,
   Expense,
+  Message,
   PendingPayment,
   Person,
+  PrayerRequest,
   Project,
   Settings,
+  TempleEvent,
   Transaction,
   User,
   Vendor,
@@ -110,6 +115,39 @@ const baseUsers: User[] = [
   { userID: 'USR-0004', name: 'Committee Viewer', email: 'viewer@temple.org', role: 'viewer', status: 'active', createdDate: '2025-11-01', password: 'viewer123' },
 ]
 
+const baseAnnouncements: Announcement[] = [
+  { announcementID: 'ANN-0001', title: 'Ratha Yatra 2026 date announced', body: 'This year\u2019s Ratha Yatra will be held on 12 September 2026. Volunteers are requested to assemble from 7:00 AM at the temple. Please contact the Manager for seva assignments.', postedBy: 'Temple Administrator', postedAt: '2026-08-25T09:00:00Z', pinned: true, expiresAt: '2026-09-13', status: 'active' },
+  { announcementID: 'ANN-0002', title: 'Monthly committee meeting this Sunday', body: 'The monthly management committee meeting is scheduled for Sunday at 6:00 PM in the office. All heads of departments please attend.', postedBy: 'Projects Manager', postedAt: '2026-08-28T14:30:00Z', pinned: false, expiresAt: '2026-08-31', status: 'active' },
+  { announcementID: 'ANN-0003', title: 'New kitchen equipment arrived', body: 'The new cooking vessels sponsored by Mr. Narayanan Murthy have arrived. They will be installed in the kitchen next week.', postedBy: 'Chief Accountant', postedAt: '2026-08-20T11:00:00Z', pinned: false, expiresAt: '2026-09-01', status: 'active' },
+]
+
+const baseMessages: Message[] = [
+  { messageID: 'MSG-0001', senderEmail: 'manager@temple.org', senderName: 'Projects Manager', recipientEmail: 'admin@temple.org', subject: 'Cement order approval', body: 'Ultra Cement has submitted a revised quote for 300 bags. Requesting your approval for the purchase order.', sentAt: '2026-08-29T10:15:00Z', read: true, readAt: '2026-08-29T10:20:00Z' },
+  { messageID: 'MSG-0002', senderEmail: 'accountant@temple.org', senderName: 'Chief Accountant', recipientEmail: 'admin@temple.org', subject: 'Cash position update', body: 'Cash balance is now zero as requested. We should credit the petty cash soon before the Ratha Yatra advance purchases.', sentAt: '2026-08-29T15:40:00Z', read: false, readAt: '' },
+  { messageID: 'MSG-0003', senderEmail: 'admin@temple.org', senderName: 'Temple Administrator', recipientEmail: 'accountant@temple.org', subject: 'Re: Cash position update', body: 'Approved. Please move 25,000 from the Main Bank Account to Temple Cash and log the transaction.', sentAt: '2026-08-29T16:05:00Z', read: false, readAt: '' },
+]
+
+const baseEvents: TempleEvent[] = [
+  { eventID: 'EVT-0001', title: 'Ratha Yatra', date: '2026-09-12', time: '07:00', location: 'Temple compound to City Centre', description: 'Annual chariot festival with kirtan and prasadam distribution.', category: 'Festival', budget: 500000, organizer: 'Temple Administrator', status: 'upcoming' },
+  { eventID: 'EVT-0002', title: 'Monthly Committee Meeting', date: '2026-08-30', time: '18:00', location: 'Temple office', description: 'Monthly management review.', category: 'Meeting', budget: 0, organizer: 'Projects Manager', status: 'upcoming' },
+  { eventID: 'EVT-0003', title: 'Gita Study Circle', date: '2026-09-05', time: '17:30', location: 'Prayer Hall', description: 'Weekly Bhagavad-gita class.', category: 'Program', budget: 0, organizer: 'Committee Viewer', status: 'upcoming' },
+  { eventID: 'EVT-0004', title: 'Kitchen Seva Day', date: '2026-09-06', time: '06:00', location: 'Kitchen', description: 'Group cooking seva for the Sunday feast.', category: 'Seva', budget: 5000, organizer: 'Chief Accountant', status: 'upcoming' },
+  { eventID: 'EVT-0005', title: 'Janmashtami', date: '2026-09-04', time: '20:00', location: 'Main Hall', description: 'Birthday celebration of Lord Krishna with midnight abhishek.', category: 'Festival', budget: 120000, organizer: 'Temple Administrator', status: 'upcoming' },
+]
+
+const baseEventVolunteers: EventVolunteer[] = [
+  { volunteerID: 'VOL-0001', eventID: 'EVT-0001', personID: 'PER-0004', name: 'Shyamasundar Devotee', role: 'Coordinator', registeredAt: '2026-08-20T09:00:00Z' },
+  { volunteerID: 'VOL-0002', eventID: 'EVT-0001', personID: 'PER-0010', name: 'Suresh Patil', role: 'Lead', registeredAt: '2026-08-21T10:00:00Z' },
+  { volunteerID: 'VOL-0003', eventID: 'EVT-0001', personID: 'PER-0007', name: 'Lakshmi Narasimha', role: 'Volunteer', registeredAt: '2026-08-22T11:00:00Z' },
+  { volunteerID: 'VOL-0004', eventID: 'EVT-0004', personID: 'PER-0009', name: 'Ramesh Kumar', role: 'Lead', registeredAt: '2026-08-24T09:30:00Z' },
+]
+
+const baseRequests: PrayerRequest[] = [
+  { requestID: 'REQ-0001', date: '2026-08-25', personID: 'PER-0005', personName: 'Narayanan Murthy', type: 'Seva Request', description: 'Requesting to sponsor daily cow feeding for one year.', assignedTo: 'Temple Administrator', status: 'open', notes: '' },
+  { requestID: 'REQ-0002', date: '2026-08-27', personID: 'PER-0002', personName: 'Madhumati Devi Dasi', type: 'Prayer Request', description: 'Prayer for late husband\u2019s shraddha ceremony arrangements.', assignedTo: '', status: 'open', notes: '' },
+  { requestID: 'REQ-0003', date: '2026-08-28', personID: 'PER-0008', personName: 'Sita Devi', type: 'Assistance', description: 'Needs help reaching temple for the Sunday feast.', assignedTo: 'Projects Manager', status: 'in-progress', notes: 'Arranged pickup with volunteer' },
+]
+
 export const mockData = {
   users: baseUsers,
   people: basePeople,
@@ -122,6 +160,11 @@ export const mockData = {
   transactions: baseTransactions,
   settings: baseSettings,
   auditLog: [] as AuditLogEntry[],
+  announcements: baseAnnouncements,
+  messages: baseMessages,
+  events: baseEvents,
+  eventVolunteers: baseEventVolunteers,
+  requests: baseRequests,
 }
 
 export function buildDashboardData(

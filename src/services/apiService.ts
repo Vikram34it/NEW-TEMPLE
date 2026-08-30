@@ -2,13 +2,18 @@ import { CONFIG } from '../config/apiConfig'
 import { buildDashboardData, mockData } from '../data/mockData'
 import type {
   Account,
+  Announcement,
   DashboardData,
   Donation,
+  EventVolunteer,
   Expense,
+  Message,
   PendingPayment,
   Person,
+  PrayerRequest,
   Project,
   Settings,
+  TempleEvent,
   Transaction,
   User,
   Vendor,
@@ -32,8 +37,13 @@ type RecordName =
   | 'transactions'
   | 'settings'
   | 'auditLog'
+  | 'announcements'
+  | 'messages'
+  | 'events'
+  | 'eventVolunteers'
+  | 'requests'
 
-type MutateOp = 'create' | 'update' | 'softDelete' | 'delete'
+type MutateOp = 'create' | 'update' | 'softDelete' | 'hardDelete' | 'delete'
 
 // Optional token sent to the backend (e.g. the API_KEY from Apps Script).
 // Configure it via an environment variable at build time where appropriate.
@@ -65,11 +75,12 @@ async function apiFetch(path: string, params: Record<string, string> = {}, body?
 // record read from the API so the app can consume it as-is.
 function toCamel<T>(obj: Record<string, unknown>): T {
   const out: Record<string, unknown> = {}
+  const boolKeys = ['deleted', 'pinned', 'read', 'deletedBySender', 'deletedByRecipient']
   for (const [k, v] of Object.entries(obj)) {
     if (k.startsWith('_')) continue // skip internal keys such as _row
     const key = k.charAt(0).toLowerCase() + k.slice(1)
     let val = v
-    if (key === 'deleted' && typeof val === 'string') {
+    if (boolKeys.includes(key) && typeof val === 'string') {
       val = /^true$/i.test(val)
     } else if (key === 'personType' && typeof val === 'string') {
       val = val.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
@@ -129,6 +140,40 @@ const RECORD_META: Record<RecordName, RecordMeta> = {
   transactions: { idField: 'transactionID', create: 'createTransaction' },
   settings: { idField: '' },
   auditLog: { idField: '' },
+  announcements: {
+    idField: 'announcementID',
+    create: 'createAnnouncement',
+    update: 'updateAnnouncement',
+    softDelete: 'archiveAnnouncement',
+    skipOnCreate: ['announcementID', 'postedAt'],
+  },
+  messages: {
+    idField: 'messageID',
+    create: 'sendMessage',
+    update: 'markMessageRead',
+    skipOnCreate: ['messageID', 'sentAt', 'read', 'readAt', 'deletedBySender', 'deletedByRecipient'],
+  },
+  events: {
+    idField: 'eventID',
+    create: 'createEvent',
+    update: 'updateEvent',
+    hardDelete: 'deleteEvent',
+    skipOnCreate: ['eventID'],
+  },
+  eventVolunteers: {
+    idField: 'volunteerID',
+    create: 'createVolunteer',
+    update: 'updateVolunteer',
+    hardDelete: 'removeVolunteer',
+    skipOnCreate: ['volunteerID', 'registeredAt'],
+  },
+  requests: {
+    idField: 'requestID',
+    create: 'createRequest',
+    update: 'updateRequest',
+    hardDelete: 'deleteRequest',
+    skipOnCreate: ['requestID'],
+  },
 }
 
 // Convert a frontend camelCase record into the object the backend expects
@@ -295,6 +340,57 @@ export const dataService = {
   },
   async getSettings(): Promise<Settings> {
     return (await api.load('settings')) as Settings
+  },
+
+  async getAnnouncements(): Promise<Announcement[]> {
+    return (await api.load('announcements')) as Announcement[]
+  },
+  async getMessages(email: string): Promise<Message[]> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      const data = (await apiFetch('getMessages', { me: email })) as unknown[]
+      return data.map((r) => toCamel(r as Record<string, unknown>)) as Message[]
+    }
+    const all = mockStore.data.messages as Message[]
+    const me = String(email || '').trim().toLowerCase()
+    return all.filter((m) => {
+      const toMe = (m.recipientEmail || '').toLowerCase() === me
+      const fromMe = (m.senderEmail || '').toLowerCase() === me
+      if (!toMe && !fromMe) return false
+      if (toMe && m.deletedByRecipient) return false
+      if (fromMe && m.deletedBySender) return false
+      return true
+    })
+  },
+  async getEvents(): Promise<TempleEvent[]> {
+    return (await api.load('events')) as TempleEvent[]
+  },
+  async getEventVolunteers(): Promise<EventVolunteer[]> {
+    return (await api.load('eventVolunteers')) as EventVolunteer[]
+  },
+  async getRequests(): Promise<PrayerRequest[]> {
+    return (await api.load('requests')) as PrayerRequest[]
+  },
+
+  // Mark a message as read (partial update against the backend / mock store).
+  async markMessageRead(messageID: string): Promise<void> {
+    await api.mutate('messages', 'update', {
+      messageID,
+      read: true,
+      readAt: new Date().toISOString(),
+    })
+  },
+
+  // Soft-delete a message for one side only (sender or recipient).
+  async deleteMessage(messageID: string, email: string, side: 'sender' | 'recipient'): Promise<void> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      await apiFetch('deleteMessage', {}, { id: messageID, email, side })
+      return
+    }
+    const arr = mockStore.data.messages as Message[]
+    const item = arr.find((m) => m.messageID === messageID)
+    if (!item) throw new Error('Message not found')
+    if (side === 'sender') item.deletedBySender = true
+    else item.deletedByRecipient = true
   },
 
   async login(email: string, password: string): Promise<User> {

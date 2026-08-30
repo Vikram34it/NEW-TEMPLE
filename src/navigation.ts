@@ -30,6 +30,15 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     ],
   },
   {
+    title: 'Community',
+    items: [
+      { path: '/announcements', label: 'Announcements', roles: ['admin', 'accountant', 'manager', 'viewer'] },
+      { path: '/messages', label: 'Messages', roles: ['admin', 'accountant', 'manager', 'viewer'] },
+      { path: '/events', label: 'Events', roles: ['admin', 'accountant', 'manager', 'viewer'] },
+      { path: '/requests', label: 'Requests', roles: ['admin', 'accountant', 'manager', 'viewer'] },
+    ],
+  },
+  {
     title: 'Insights',
     items: [
       { path: '/reports', label: 'Reports', roles: ['admin', 'accountant', 'manager', 'viewer'] },

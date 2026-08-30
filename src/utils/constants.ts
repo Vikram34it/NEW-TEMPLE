@@ -82,3 +82,37 @@ export const PROJECT_STATUSES = [
   'On Hold',
   'Completed',
 ] as const
+
+export const EVENT_CATEGORIES = [
+  'Festival',
+  'Program',
+  'Seva',
+  'Meeting',
+  'Other',
+] as const
+
+export const EVENT_STATUSES = [
+  'Upcoming',
+  'Completed',
+  'Cancelled',
+] as const
+
+export const VOLUNTEER_ROLES = [
+  'Volunteer',
+  'Lead',
+  'Coordinator',
+] as const
+
+export const REQUEST_TYPES = [
+  'Prayer Request',
+  'Seva Request',
+  'Assistance',
+  'Other',
+] as const
+
+export const REQUEST_STATUSES = [
+  'Open',
+  'In Progress',
+  'Resolved',
+  'Closed',
+] as const

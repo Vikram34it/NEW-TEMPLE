@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, ReceiptText, Trash2, Eye, Upload } from 'lucide-react'
+import { Plus, Pencil, Trash2, Eye, Upload } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Modal, Badge, PageHeader, Field, Input, Select } from '../components/ui'
 import { BulkUploadModal, type ImportColumn } from '../components/BulkUploadModal'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { DonationForm } from '../components/forms/DonationForm'
-import { formatCurrency, formatDate, downloadCSV } from '../utils/helpers'
+import { ReceiptModal } from '../components/ReceiptModal'
+import { formatCurrency, formatDate } from '../utils/helpers'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../utils/constants'
 import type { Donation } from '../types'
 
@@ -26,10 +27,11 @@ const DONATION_IMPORT_COLUMNS: ImportColumn[] = [
 ]
 
 export function DonationsPage() {
-  const { donations, can, softDeleteDonation, bulkAddDonations } = useApp()
+  const { donations, can, softDeleteDonation, bulkAddDonations, settings } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editDonation, setEditDonation] = useState<Donation | null>(null)
   const [viewDonation, setViewDonation] = useState<Donation | null>(null)
+  const [receiptDonation, setReceiptDonation] = useState<Donation | null>(null)
   const [showBulk, setShowBulk] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('')
   const [methodFilter, setMethodFilter] = useState('')
@@ -186,19 +188,17 @@ export function DonationsPage() {
         {viewDonation && (
           <DonationDetail
             d={viewDonation}
-            onReceipt={() => downloadCSV(`${viewDonation.receiptNumber}.csv`, ['Field', 'Value'], [
-              ['Receipt Number', viewDonation.receiptNumber],
-              ['Date', viewDonation.date],
-              ['Donor', viewDonation.donorName],
-              ['Amount', viewDonation.amount],
-              ['Category', viewDonation.category],
-              ['Method', viewDonation.paymentMethod],
-              ['Reference', viewDonation.transactionReference],
-              ['Received By', viewDonation.receivedBy],
-            ])}
+            onReceipt={() => {
+              setReceiptDonation(viewDonation)
+              setViewDonation(null)
+            }}
           />
         )}
       </Modal>
+
+      {receiptDonation && (
+        <ReceiptModal donation={receiptDonation} settings={settings} onClose={() => setReceiptDonation(null)} />
+      )}
     </div>
   )
 }
@@ -235,7 +235,7 @@ function DonationDetail({ d, onReceipt }: { d: Donation; onReceipt: () => void }
         </div>
       )}
       <div className="flex justify-end pt-2">
-        <Button variant="secondary" onClick={onReceipt}><ReceiptText size={16} /> Download Receipt</Button>
+        <Button variant="secondary" onClick={onReceipt}>Print Receipt</Button>
       </div>
     </div>
   )

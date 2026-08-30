@@ -64,6 +64,11 @@ var CONFIG = {
     accounts: 'Accounts',
     transactions: 'Transactions',
     audit: 'AuditLog',
+    announcements: 'Announcements',
+    messages: 'Messages',
+    events: 'Events',
+    eventVolunteers: 'EventVolunteers',
+    requests: 'Requests',
   },
 };
 
@@ -230,6 +235,11 @@ var HEADERS = {
   accounts: ['AccountID', 'AccountName', 'OpeningBalance', 'CurrentBalance', 'Type', 'Notes'],
   transactions: ['TransactionID', 'Date', 'Type', 'IncomeOrExpense', 'Amount', 'Account', 'ReferenceID', 'Description', 'CreatedBy'],
   audit: ['LogID', 'DateTime', 'User', 'Action', 'Module', 'RecordID', 'OldValue', 'NewValue'],
+  announcements: ['AnnouncementID', 'Title', 'Body', 'PostedBy', 'PostedAt', 'Pinned', 'ExpiresAt', 'Status', 'Deleted'],
+  messages: ['MessageID', 'SenderEmail', 'SenderName', 'RecipientEmail', 'Subject', 'Body', 'SentAt', 'Read', 'ReadAt', 'DeletedBySender', 'DeletedByRecipient'],
+  events: ['EventID', 'Title', 'Date', 'Time', 'Location', 'Description', 'Category', 'Budget', 'Organizer', 'Status'],
+  eventVolunteers: ['VolunteerID', 'EventID', 'PersonID', 'Name', 'Role', 'RegisteredAt'],
+  requests: ['RequestID', 'Date', 'PersonID', 'PersonName', 'Type', 'Description', 'AssignedTo', 'Status', 'Notes'],
 };
 
 /* ==========================================================================
@@ -315,6 +325,11 @@ function route_(action, params, body, method) {
     case 'getDashboardData': return buildDashboard_();
     case 'getReports': return getReports_(params);
     case 'getAuditLog': return readAll_(CONFIG.sheetNames.audit, HEADERS.audit);
+    case 'getAnnouncements': return readAll_(CONFIG.sheetNames.announcements, HEADERS.announcements);
+    case 'getMessages': return getMessages_(params.me || (body && body.me) || '');
+    case 'getEvents': return readAll_(CONFIG.sheetNames.events, HEADERS.events);
+    case 'getEventVolunteers': return readAll_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers);
+    case 'getRequests': return readAll_(CONFIG.sheetNames.requests, HEADERS.requests);
 
     // --- Aliases: the frontend sends the bare lowercase record name for reads.
     case 'users': return readAll_(CONFIG.sheetNames.users, HEADERS.users);
@@ -328,6 +343,11 @@ function route_(action, params, body, method) {
     case 'transactions': return readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
     case 'settings': return getSettings_();
     case 'auditLog': return readAll_(CONFIG.sheetNames.audit, HEADERS.audit);
+    case 'announcements': return readAll_(CONFIG.sheetNames.announcements, HEADERS.announcements);
+    case 'messages': return getMessages_(params.me || (body && body.me) || '');
+    case 'events': return readAll_(CONFIG.sheetNames.events, HEADERS.events);
+    case 'eventVolunteers': return readAll_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers);
+    case 'requests': return readAll_(CONFIG.sheetNames.requests, HEADERS.requests);
 
     // --- Writes (generic CRUD, one endpoint per table) ---
     case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
@@ -362,6 +382,30 @@ function route_(action, params, body, method) {
     case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
     case 'updateSettings': return updateSettings_(body.settings);
     case 'login': return login_(body);
+
+    // --- Community: announcements ---
+    case 'createAnnouncement': return createRecord_(CONFIG.sheetNames.announcements, HEADERS.announcements, body.record, 'ANN-', 'announcement', ['Title']);
+    case 'updateAnnouncement': return updateRecord_(CONFIG.sheetNames.announcements, HEADERS.announcements, body.record, 'AnnouncementID');
+    case 'archiveAnnouncement': return softDeleteRecord_(CONFIG.sheetNames.announcements, 'AnnouncementID', body.id);
+
+    // --- Community: messages ---
+    case 'sendMessage': return createRecord_(CONFIG.sheetNames.messages, HEADERS.messages, body.record, 'MSG-', 'message', ['RecipientEmail', 'Subject', 'Body']);
+    case 'markMessageRead': return updateRecord_(CONFIG.sheetNames.messages, HEADERS.messages, body.record, 'MessageID');
+    case 'deleteMessage': return deleteMessage_(body.id, body.email, body.side);
+
+    // --- Community: events + volunteers ---
+    case 'createEvent': return createRecord_(CONFIG.sheetNames.events, HEADERS.events, body.record, 'EVT-', 'event', ['Title', 'Date']);
+    case 'updateEvent': return updateRecord_(CONFIG.sheetNames.events, HEADERS.events, body.record, 'EventID');
+    case 'deleteEvent': return hardDeleteRecord_(CONFIG.sheetNames.events, 'EventID', body.id);
+
+    case 'createVolunteer': return createRecord_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers, body.record, 'VOL-', 'volunteer', ['EventID', 'Name']);
+    case 'updateVolunteer': return updateRecord_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers, body.record, 'VolunteerID');
+    case 'removeVolunteer': return hardDeleteRecord_(CONFIG.sheetNames.eventVolunteers, 'VolunteerID', body.id);
+
+    // --- Community: prayer / seva requests ---
+    case 'createRequest': return createRecord_(CONFIG.sheetNames.requests, HEADERS.requests, body.record, 'REQ-', 'request', ['PersonName', 'Description']);
+    case 'updateRequest': return updateRecord_(CONFIG.sheetNames.requests, HEADERS.requests, body.record, 'RequestID');
+    case 'deleteRequest': return hardDeleteRecord_(CONFIG.sheetNames.requests, 'RequestID', body.id);
 
     default:
       throw new Error('Unknown action: ' + action);
@@ -424,6 +468,31 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
     var receiptPrefix = String(getSettings_().receiptPrefix || 'REC');
     record.ReceiptNumber = receiptPrefix + '-' + id.split('-')[1] + '-' + pad4_(parseIdNumber(id));
     record.CreatedAt = new Date().toISOString();
+  }
+
+  // Auto-generate timestamps / defaults for community modules
+  if (module === 'announcement') {
+    record.AnnouncementID = id;
+    if (record.PostedAt === undefined) record.PostedAt = new Date().toISOString();
+    if (record.Pinned === undefined) record.Pinned = 'FALSE';
+    if (record.Status === undefined) record.Status = 'active';
+  }
+  if (module === 'message') {
+    record.MessageID = id;
+    if (record.SentAt === undefined) record.SentAt = new Date().toISOString();
+    if (record.Read === undefined) record.Read = 'FALSE';
+    if (record.ReadAt === undefined) record.ReadAt = '';
+  }
+  if (module === 'volunteer') {
+    record.VolunteerID = id;
+    if (record.RegisteredAt === undefined) record.RegisteredAt = new Date().toISOString();
+  }
+  if (module === 'event') {
+    record.EventID = id;
+  }
+  if (module === 'request') {
+    record.RequestID = id;
+    if (record.Status === undefined) record.Status = 'open';
   }
 
   var row = [];
@@ -525,6 +594,43 @@ function validateRecord_(record, required) {
     if (isNaN(Number(record.Amount))) throw new Error('Amount must be a number');
     if (Number(record.Amount) < 0) throw new Error('Amount cannot be negative');
   }
+}
+
+/* ==========================================================================
+ * MESSAGES (per-user mailbox)
+ * ========================================================================== */
+
+/* Return messages that belong to the given email: those sent TO me and not
+ * deleted-by-me-on-the-recipient-side, plus those sent BY me and not deleted by
+ * me on the sender side. */
+function getMessages_(email) {
+  var all = tableData_(CONFIG.sheetNames.messages, HEADERS.messages);
+  email = String(email || '').trim().toLowerCase();
+  return all.filter(function (m) {
+    var toMe = String(m.RecipientEmail || '').trim().toLowerCase() === email;
+    var fromMe = String(m.SenderEmail || '').trim().toLowerCase() === email;
+    if (!toMe && !fromMe) return false;
+    if (toMe && String(m.DeletedByRecipient) === 'TRUE') return false;
+    if (fromMe && String(m.DeletedBySender) === 'TRUE') return false;
+    return true;
+  });
+}
+
+/* Soft-delete a message for one side only (sender or recipient). */
+function deleteMessage_(id, email, side) {
+  var sheet = sheet_(CONFIG.sheetNames.messages);
+  var headers = HEADERS.messages;
+  var data = tableData_(CONFIG.sheetNames.messages, headers);
+  var col = side === 'sender' ? headers.indexOf('DeletedBySender') : headers.indexOf('DeletedByRecipient');
+  if (col < 0) throw new Error('Invalid delete side');
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r].MessageID) === String(id)) {
+      sheet.getRange(r + 2, col + 1).setValue('TRUE');
+      audit_('messages', 'Delete', id, '', email + ' / ' + side);
+      return { success: true, deleted: true };
+    }
+  }
+  throw new Error('Message not found: ' + id);
 }
 
 /* ==========================================================================

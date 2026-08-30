@@ -10,6 +10,7 @@ import {
   TrendingUp,
   TrendingDown,
   Plus,
+  Pin,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -27,8 +28,8 @@ import {
   Line,
 } from 'recharts'
 import { useApp } from '../context/AppContext'
-import { StatCard, Card, CardHeader, Button, Modal } from '../components/ui'
-import { formatCurrency, monthLabel } from '../utils/helpers'
+import { StatCard, Card, CardHeader, Button, Modal, Badge } from '../components/ui'
+import { formatCurrency, monthLabel, formatDateTime } from '../utils/helpers'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ExpenseForm } from '../components/forms/ExpenseForm'
 
@@ -37,11 +38,24 @@ const labelFmt = (label: unknown) => monthLabel(String(label))
 const PIE_COLORS = ['#f97316', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#6366f1']
 
 export function DashboardPage() {
-  const { dashboard, can, settings } = useApp()
+  const { dashboard, can, settings, announcements, events } = useApp()
   const [showDonation, setShowDonation] = useState(false)
   const [showExpense, setShowExpense] = useState(false)
 
   if (!dashboard) return null
+
+  const today = new Date().toISOString().slice(0, 10)
+  const topAnnouncements = announcements
+    .filter((a) => !a.deleted && a.status !== 'archived' && (!a.expiresAt || a.expiresAt >= today))
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+      return b.postedAt.localeCompare(a.postedAt)
+    })
+    .slice(0, 3)
+  const upcomingEvents = events
+    .filter((e) => e.status === 'upcoming' && e.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .slice(0, 3)
 
   const actions = (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -93,6 +107,62 @@ export function DashboardPage() {
         <StatCard label="Pending Payments" value={formatCurrency(dashboard.pendingPayments)} icon={<Clock size={20} />} color="violet" />
         <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
         <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />
+      </div>
+
+      {/* Community & announcements */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader
+            title="Latest Announcements"
+            subtitle="Temple notices"
+            action={<Link to="/announcements" className="text-xs text-orange-600 hover:underline font-medium">View all</Link>}
+          />
+          <div className="p-4 space-y-3">
+            {topAnnouncements.length === 0 && (
+              <p className="text-sm text-slate-400">No announcements yet</p>
+            )}
+            {topAnnouncements.map((a) => (
+              <Link key={a.announcementID} to="/announcements" className="block p-3 rounded-lg border border-slate-100 hover:border-orange-200 hover:bg-orange-50/40 transition-colors">
+                <div className="flex items-center gap-2">
+                  {a.pinned && <Pin size={13} className="text-orange-600 shrink-0" />}
+                  <p className="text-sm font-medium text-slate-800 truncate">{a.title}</p>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">{a.body}</p>
+                <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(a.postedAt)}</p>
+              </Link>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Upcoming Events"
+            subtitle="Next temple events"
+            action={<Link to="/events" className="text-xs text-orange-600 hover:underline font-medium">View all</Link>}
+          />
+          <div className="p-4 space-y-3">
+            {upcomingEvents.length === 0 && (
+              <p className="text-sm text-slate-400">No upcoming events</p>
+            )}
+            {upcomingEvents.map((e) => (
+              <Link key={e.eventID} to="/events" className="flex items-center gap-3 p-3 rounded-lg border border-slate-100 hover:border-orange-200 hover:bg-orange-50/40 transition-colors">
+                <div className="w-9 shrink-0 rounded-lg bg-orange-50 text-orange-600 flex flex-col items-center justify-center px-2 py-1">
+                  <span className="text-[10px] uppercase font-semibold leading-none">
+                    {new Date(e.date + 'T00:00:00').toLocaleString('en', { month: 'short' })}
+                  </span>
+                  <span className="text-base font-bold leading-tight">{new Date(e.date + 'T00:00:00').getDate()}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-800 truncate">{e.title}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">
+                    {e.time || ''}{e.location ? ` · ${e.location}` : ''}
+                  </p>
+                </div>
+                <Badge color="blue">{e.category || 'Other'}</Badge>
+              </Link>
+            ))}
+          </div>
+        </Card>
       </div>
 
       {/* Charts row 1 */}

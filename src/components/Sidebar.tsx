@@ -14,6 +14,10 @@ import {
   LogOut,
   Building2 as TempleIcon,
   X,
+  Megaphone,
+  Mail,
+  CalendarDays,
+  HeartHandshake,
 } from 'lucide-react'
 import { NAV_SECTIONS } from '../navigation'
 import { useApp } from '../context/AppContext'
@@ -30,6 +34,10 @@ const icons: Record<string, React.ReactNode> = {
   '/transactions': <ArrowLeftRight size={18} />,
   '/reports': <BarChart3 size={18} />,
   '/settings': <Settings size={18} />,
+  '/announcements': <Megaphone size={18} />,
+  '/messages': <Mail size={18} />,
+  '/events': <CalendarDays size={18} />,
+  '/requests': <HeartHandshake size={18} />,
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {

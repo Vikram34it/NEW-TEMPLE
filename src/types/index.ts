@@ -162,4 +162,64 @@ export interface DashboardData {
   constructionBudgets: { name: string; budget: number; actual: number }[]
 }
 
+export interface Announcement {
+  announcementID: string
+  title: string
+  body: string
+  postedBy: string
+  postedAt: string
+  pinned: boolean
+  expiresAt: string
+  status: 'active' | 'archived'
+  deleted?: boolean
+}
+
+export interface Message {
+  messageID: string
+  senderEmail: string
+  senderName: string
+  recipientEmail: string
+  subject: string
+  body: string
+  sentAt: string
+  read: boolean
+  readAt: string
+  deletedBySender?: boolean
+  deletedByRecipient?: boolean
+}
+
+export interface TempleEvent {
+  eventID: string
+  title: string
+  date: string
+  time: string
+  location: string
+  description: string
+  category: string
+  budget: number
+  organizer: string
+  status: 'upcoming' | 'completed' | 'cancelled'
+}
+
+export interface EventVolunteer {
+  volunteerID: string
+  eventID: string
+  personID: string
+  name: string
+  role: string
+  registeredAt: string
+}
+
+export interface PrayerRequest {
+  requestID: string
+  date: string
+  personID: string
+  personName: string
+  type: string
+  description: string
+  assignedTo: string
+  status: 'open' | 'in-progress' | 'resolved' | 'closed'
+  notes: string
+}
+
 export type { Settings as AppSettings }
