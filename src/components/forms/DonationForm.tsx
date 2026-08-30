@@ -82,27 +82,35 @@ export function DonationForm({ initial, onDone }: Props) {
         <Field label="Date" required>
           <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} required />
         </Field>
-        <Field label="Donor" required>
+        <Field label="Choose a Saved Donor (optional)">
           <select
             className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none"
             value={form.donorName}
             onChange={(e) => {
-              set('donorName', e.target.value)
-              const donor = knownDonors.find((d) => d.name === e.target.value)
-              if (donor) set('phone', donor.phone)
+              const name = e.target.value
+              set('donorName', name)
+              const donor = knownDonors.find((d) => d.name === name)
+              if (donor) {
+                set('phone', donor.phone)
+                set('email', donor.email)
+                set('address', donor.address)
+              } else {
+                if (name === '') set('phone', '')
+              }
             }}
           >
-            <option value="">Select existing donor or type below</option>
+            <option value="">— Pick a saved donor (or type below) —</option>
             {knownDonors.map((d) => (
               <option key={d.personID} value={d.name}>{d.name}</option>
             ))}
           </select>
+          <p className="text-[11px] text-slate-400 mt-1">Tip: choosing a saved donor auto-fills their contact details and links the donation to their Donor Care profile.</p>
         </Field>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
         <Field label="Donor Name" required>
-          <Input value={form.donorName} onChange={(e) => set('donorName', e.target.value)} placeholder="Full name" required />
+          <Input value={form.donorName} onChange={(e) => set('donorName', e.target.value)} placeholder="Full name (or pick from the list above)" required />
         </Field>
         <Field label="Phone">
           <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="Mobile number" />
