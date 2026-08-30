@@ -50,7 +50,7 @@ interface Props {
   title: string
   description?: string
   columns: ImportColumn[]
-  onImport: (rows: Array<Record<string, unknown>>) => string | null
+  onImport: (rows: Array<Record<string, unknown>>) => Promise<string | null>
   onImported?: () => void
 }
 
@@ -60,6 +60,7 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const headers = columns.map((c) => c.header)
 
@@ -129,7 +130,7 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
   const rowErrors = rows ? rows.filter((r) => r.errors.length > 0).length : 0
   const validRows = rows ? rows.length - rowErrors : 0
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!rows) return
     if (rowErrors > 0) {
       setError('Fix the errors before importing.')
@@ -146,14 +147,22 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
       })
       return out
     })
-    const err = onImport(data)
-    if (err) {
-      setError(err)
-      return
-    }
-    setDone(true)
     setError('')
-    if (onImported) onImported()
+    setImporting(true)
+    try {
+      const err = await onImport(data)
+      if (err) {
+        setError(err)
+        setImporting(false)
+        return
+      }
+      setDone(true)
+      if (onImported) onImported()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setImporting(false)
+    }
   }
 
   const reset = () => {
@@ -176,8 +185,8 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
         ) : (
           <>
             <Button variant="secondary" onClick={() => { reset(); onClose() }}>Cancel</Button>
-            <Button onClick={handleImport} disabled={!rows || rows.length === 0 || rowErrors > 0}>
-              Import {rows && validRows > 0 ? `${validRows}` : ''} record{rows && validRows === 1 ? '' : 's'}
+            <Button onClick={handleImport} disabled={importing || !rows || rows.length === 0 || rowErrors > 0}>
+              {importing ? 'Importing…' : `Import ${rows && validRows > 0 ? `${validRows}` : ''} record${rows && validRows === 1 ? '' : 's'}`}
             </Button>
           </>
         )

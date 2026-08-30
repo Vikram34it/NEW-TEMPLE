@@ -36,7 +36,7 @@ export function DonationsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  const handleBulkImport = (rows: Array<Record<string, unknown>>): string | null => {
+  const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
     const items = rows.map((r) => ({
       date: r.date as string,
       donorID: (r.donorID as string) || '',
@@ -53,8 +53,12 @@ export function DonationsPage() {
       receiptNumber: '',
       notes: (r.notes as string) || '',
     }))
-    bulkAddDonations(items)
-    return null
+    try {
+      await bulkAddDonations(items)
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to import donations'
+    }
   }
 
   const filtered = useMemo(() => {
@@ -71,7 +75,7 @@ export function DonationsPage() {
 
   const handleDelete = (d: Donation) => {
     if (confirm(`Mark donation ${d.donationID} as cancelled?`)) {
-      softDeleteDonation(d.donationID)
+      void softDeleteDonation(d.donationID).catch(() => {})
     }
   }
 

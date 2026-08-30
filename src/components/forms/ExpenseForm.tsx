@@ -52,6 +52,7 @@ export function ExpenseForm({ initial, onDone }: Props) {
   const [categoryGroup, setCategoryGroup] = useState<'construction' | 'operations'>('construction')
   const [customCategory, setCustomCategory] = useState(false)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = <K extends keyof DonationLike2>(key: K, value: DonationLike2[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -62,19 +63,27 @@ export function ExpenseForm({ initial, onDone }: Props) {
     ? CONSTRUCTION_EXPENSE_CATEGORIES
     : OPERATIONS_EXPENSE_CATEGORIES
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.description.trim()) return setError('Description is required')
     if (!form.amount || form.amount <= 0) return setError('Amount must be greater than zero')
     const approvedBy = form.approvedBy || user?.name || ''
     const paidBy = form.paidBy || user?.name || ''
 
-    if (initial?.expenseID) {
-      updateExpense({ ...form, expenseID: initial.expenseID, approvedBy, paidBy } as never)
-    } else {
-      addExpense({ ...form, approvedBy, paidBy } as never)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.expenseID) {
+        await updateExpense({ ...form, expenseID: initial.expenseID, approvedBy, paidBy } as never)
+      } else {
+        await addExpense({ ...form, approvedBy, paidBy } as never)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save expense')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -190,7 +199,7 @@ export function ExpenseForm({ initial, onDone }: Props) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.expenseID ? 'Save Changes' : 'Add Expense'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.expenseID ? 'Save Changes' : 'Add Expense'}</Button>
       </div>
     </form>
   )

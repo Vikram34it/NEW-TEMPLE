@@ -113,18 +113,27 @@ function ProjectForm({ initial, onDone }: { initial?: Partial<Project>; onDone: 
     projectName: '', description: '', startDate: new Date().toISOString().slice(0, 10), estimatedBudget: 0, actualExpense: 0, status: 'not-started', contractor: '',
   }, ...initial })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = (k: keyof Project, v: never) => setForm((f) => ({ ...f, [k]: v }))
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.projectName?.trim()) return setError('Project name is required')
-    if (initial?.projectID) {
-      updateProject({ ...(form as Project), projectID: initial.projectID })
-    } else {
-      addProject(form as Omit<Project, 'projectID'>)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.projectID) {
+        await updateProject({ ...(form as Project), projectID: initial.projectID })
+      } else {
+        await addProject(form as Omit<Project, 'projectID'>)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save project')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -154,7 +163,7 @@ function ProjectForm({ initial, onDone }: { initial?: Partial<Project>; onDone: 
       </div>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.projectID ? 'Save Changes' : 'Add Project'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.projectID ? 'Save Changes' : 'Add Project'}</Button>
       </div>
     </form>
   )

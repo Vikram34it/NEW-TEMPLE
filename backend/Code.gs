@@ -330,36 +330,37 @@ function route_(action, params, body, method) {
     case 'auditLog': return readAll_(CONFIG.sheetNames.audit, HEADERS.audit);
 
     // --- Writes (generic CRUD, one endpoint per table) ---
-    case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation');
+    case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
     case 'updateDonation': return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DonationID');
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
 
-    case 'createExpense': return createRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'EXP-', 'expense');
+    case 'createExpense': return createRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'EXP-', 'expense', ['Description', 'Amount']);
     case 'updateExpense': return updateRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'ExpenseID');
     case 'softDeleteExpense': return softDeleteRecord_(CONFIG.sheetNames.expenses, 'ExpenseID', body.id);
 
-    case 'createPerson': return createRecord_(CONFIG.sheetNames.people, HEADERS.people, body.record, 'PER-', 'person');
+    case 'createPerson': return createRecord_(CONFIG.sheetNames.people, HEADERS.people, body.record, 'PER-', 'person', ['Name']);
     case 'updatePerson': return updateRecord_(CONFIG.sheetNames.people, HEADERS.people, body.record, 'PersonID');
     case 'deletePerson': return hardDeleteRecord_(CONFIG.sheetNames.people, 'PersonID', body.id);
 
-    case 'createVendor': return createRecord_(CONFIG.sheetNames.vendors, HEADERS.vendors, body.record, 'VEN-', 'vendor');
+    case 'createVendor': return createRecord_(CONFIG.sheetNames.vendors, HEADERS.vendors, body.record, 'VEN-', 'vendor', ['CompanyName']);
     case 'updateVendor': return updateRecord_(CONFIG.sheetNames.vendors, HEADERS.vendors, body.record, 'VendorID');
     case 'deleteVendor': return hardDeleteRecord_(CONFIG.sheetNames.vendors, 'VendorID', body.id);
 
-    case 'createProject': return createRecord_(CONFIG.sheetNames.projects, HEADERS.projects, body.record, 'PRJ-', 'project');
+    case 'createProject': return createRecord_(CONFIG.sheetNames.projects, HEADERS.projects, body.record, 'PRJ-', 'project', ['ProjectName']);
     case 'updateProject': return updateRecord_(CONFIG.sheetNames.projects, HEADERS.projects, body.record, 'ProjectID');
 
-    case 'createPayment': return createRecord_(CONFIG.sheetNames.payments, HEADERS.payments, body.record, 'PAY-', 'payment');
+    case 'createPayment': return createRecord_(CONFIG.sheetNames.payments, HEADERS.payments, body.record, 'PAY-', 'payment', []);
     case 'updatePayment': return updateRecord_(CONFIG.sheetNames.payments, HEADERS.payments, body.record, 'PaymentID');
 
-    case 'createAccount': return createRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, body.record, 'ACC-', 'account');
+    case 'createAccount': return createRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, body.record, 'ACC-', 'account', ['AccountName']);
     case 'updateAccount': return updateRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, body.record, 'AccountID');
 
-    case 'createUser': return createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user');
+    case 'createUser': return createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user', ['Name', 'Email', 'Password']);
     case 'updateUser': return updateRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'UserID');
     case 'deleteUser': return hardDeleteRecord_(CONFIG.sheetNames.users, 'UserID', body.id);
 
-    case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction');
+    case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
+    case 'updateSettings': return updateSettings_(body.settings);
     case 'login': return login_(body);
 
     default:
@@ -410,8 +411,8 @@ function mapIdToHeaders_(sheetName) {
   return sheetName.toLowerCase();
 }
 
-function createRecord_(sheetName, headers, record, prefix, module) {
-  validateRecord_(record, headers, ['Name', 'DonorName', 'Amount', 'CompanyName', 'ProjectName']);
+function createRecord_(sheetName, headers, record, prefix, module, required) {
+  validateRecord_(record, required || []);
 
   var sheet = sheet_(sheetName);
   var idCol = headers[0]; // first column is always the ID
@@ -420,7 +421,9 @@ function createRecord_(sheetName, headers, record, prefix, module) {
   // Auto-generate donation ID and receipt number for donations
   if (module === 'donation') {
     record.DonationID = id;
-    record.ReceiptNumber = 'REC-' + id.split('-')[1] + '-' + (parseIdNumber(id));
+    var receiptPrefix = String(getSettings_().receiptPrefix || 'REC');
+    record.ReceiptNumber = receiptPrefix + '-' + id.split('-')[1] + '-' + pad4_(parseIdNumber(id));
+    record.CreatedAt = new Date().toISOString();
   }
 
   var row = [];
@@ -509,7 +512,7 @@ function parseIdNumber(id) {
  * VALIDATION
  * ========================================================================== */
 
-function validateRecord_(record, headers, required) {
+function validateRecord_(record, required) {
   if (!record || typeof record !== 'object') throw new Error('Invalid record payload');
   for (var i = 0; i < required.length; i++) {
     var key = required[i];
@@ -517,11 +520,11 @@ function validateRecord_(record, headers, required) {
       throw new Error('Missing required field: ' + key);
     }
   }
-  // Numeric validate
-  if (record.Amount !== undefined && isNaN(Number(record.Amount))) {
-    throw new Error('Amount must be a number');
+  // Numeric validate (only when an amount is provided)
+  if (record.Amount !== undefined && record.Amount !== '' && record.Amount !== null) {
+    if (isNaN(Number(record.Amount))) throw new Error('Amount must be a number');
+    if (Number(record.Amount) < 0) throw new Error('Amount cannot be negative');
   }
-  if (record.Amount < 0) throw new Error('Amount cannot be negative');
 }
 
 /* ==========================================================================
@@ -571,8 +574,36 @@ function audit_(module, action, recordID, oldValue, newValue) {
 }
 
 /* ==========================================================================
- * SETTINGS (stored in Script Properties / a Settings sheet)
+ * SETTINGS (stored in a Settings sheet)
  * ========================================================================== */
+
+function updateSettings_(settings) {
+  if (!settings || typeof settings !== 'object') throw new Error('Invalid settings payload');
+  var ss = spreadsheet_();
+  var s = ss.getSheetByName('Settings');
+  if (!s) {
+    ensureSettingsSheet_(ss);
+    s = ss.getSheetByName('Settings');
+  }
+  var vals = s.getDataRange().getValues();
+  var rowFor = {};
+  for (var i = 1; i < vals.length; i++) {
+    if (vals[i][0]) rowFor[String(vals[i][0])] = i + 1;
+  }
+  var nextRow = vals.length + 1;
+  for (var k in settings) {
+    var val = settings[k] == null ? '' : String(settings[k]);
+    if (rowFor[k]) {
+      s.getRange(rowFor[k], 2).setValue(val);
+    } else {
+      s.getRange(nextRow, 1, 1, 2).setValues([[k, val]]);
+      rowFor[k] = nextRow;
+      nextRow++;
+    }
+  }
+  audit_('settings', 'Update', 'settings', '', JSON.stringify(settings));
+  return { success: true };
+}
 
 function getSettings_() {
   var settingsSheet = spreadsheet_().getSheetByName('Settings');
@@ -715,6 +746,12 @@ function monthlyTrend_(donations, expenses) {
 }
 
 function pad2_(n) { return n < 10 ? '0' + n : String(n); }
+
+function pad4_(n) {
+  var s = String(n);
+  while (s.length < 4) s = '0' + s;
+  return s;
+}
 
 function inRange_(dateStr, from, to) {
   var prefix = String(dateStr).slice(0, 10);

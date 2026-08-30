@@ -27,7 +27,7 @@ export function VendorsPage() {
   const [viewVendor, setViewVendor] = useState<Vendor | null>(null)
   const [showBulk, setShowBulk] = useState(false)
 
-  const handleBulkImport = (rows: Array<Record<string, unknown>>): string | null => {
+  const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
     const items = rows.map((r) => ({
       companyName: (r.companyName as string) || 'Unknown',
       contactPerson: (r.contactPerson as string) || '',
@@ -39,8 +39,12 @@ export function VendorsPage() {
       bankDetails: (r.bankDetails as string) || '',
       notes: (r.notes as string) || '',
     }))
-    bulkAddVendors(items)
-    return null
+    try {
+      await bulkAddVendors(items)
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to import vendors'
+    }
   }
 
   const vendorTotals = useMemo(() => {
@@ -106,7 +110,7 @@ export function VendorsPage() {
             {can('vendors:write') && (
               <>
                 <button onClick={() => setEditVendor(v)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
-                <button onClick={() => { if (confirm(`Delete vendor ${v.companyName}?`)) deleteVendor(v.vendorID) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="Delete"><Trash2 size={15} /></button>
+                <button onClick={() => { if (confirm(`Delete vendor ${v.companyName}?`)) void deleteVendor(v.vendorID).catch(() => {}) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="Delete"><Trash2 size={15} /></button>
               </>
             )}
           </div>
@@ -146,18 +150,27 @@ function VendorForm({ initial, onDone }: { initial?: Partial<Vendor>; onDone: ()
     companyName: '', contactPerson: '', phone: '', email: '', address: '', serviceType: '', gstNumber: '', bankDetails: '', notes: '',
   }, ...initial })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = (k: keyof Vendor, v: never) => setForm((f) => ({ ...f, [k]: v }))
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.companyName?.trim()) return setError('Company name is required')
-    if (initial?.vendorID) {
-      updateVendor({ ...(form as Vendor), vendorID: initial.vendorID })
-    } else {
-      addVendor(form as Omit<Vendor, 'vendorID'>)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.vendorID) {
+        await updateVendor({ ...(form as Vendor), vendorID: initial.vendorID })
+      } else {
+        await addVendor(form as Omit<Vendor, 'vendorID'>)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save vendor')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -180,7 +193,7 @@ function VendorForm({ initial, onDone }: { initial?: Partial<Vendor>; onDone: ()
       <Field label="Notes"><Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value as never)} placeholder="Notes" /></Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.vendorID ? 'Save Changes' : 'Add Vendor'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.vendorID ? 'Save Changes' : 'Add Vendor'}</Button>
       </div>
     </form>
   )

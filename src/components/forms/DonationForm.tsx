@@ -44,6 +44,7 @@ export function DonationForm({ initial, onDone }: Props) {
   const { addDonation, updateDonation, user, people } = useApp()
   const [form, setForm] = useState<DonationLike>({ ...empty, ...initial })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const [customCategory, setCustomCategory] = useState(false)
 
   const knownDonors = people.filter((p) => p.personType.includes('Donor'))
@@ -51,18 +52,26 @@ export function DonationForm({ initial, onDone }: Props) {
   const set = <K extends keyof DonationLike>(key: K, value: DonationLike[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.donorName.trim()) return setError('Donor name is required')
     if (!form.amount || form.amount <= 0) return setError('Donation amount must be greater than zero')
     const submission = { ...form, receivedBy: form.receivedBy || user?.name || '' }
 
-    if (initial?.donationID) {
-      updateDonation({ ...(submission as unknown as DonationLike), donationID: initial.donationID } as never)
-    } else {
-      addDonation(submission as never)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.donationID) {
+        await updateDonation({ ...(submission as unknown as DonationLike), donationID: initial.donationID } as never)
+      } else {
+        await addDonation(submission as never)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save donation')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -156,7 +165,7 @@ export function DonationForm({ initial, onDone }: Props) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.donationID ? 'Save Changes' : 'Add Donation'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.donationID ? 'Save Changes' : 'Add Donation'}</Button>
       </div>
     </form>
   )

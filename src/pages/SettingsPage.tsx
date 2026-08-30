@@ -11,14 +11,24 @@ export function SettingsPage() {
   const { settings, updateSettings, users, auditLog, deleteUser, can } = useApp()
   const [form, setForm] = useState({ ...settings })
   const [saveMsg, setSaveMsg] = useState('')
+  const [saving, setSaving] = useState(false)
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [tab, setTab] = useState<'temple' | 'users' | 'audit'>('temple')
 
-  const save = () => {
-    updateSettings(form)
-    setSaveMsg('Settings saved')
-    setTimeout(() => setSaveMsg(''), 2000)
+  const save = async () => {
+    setSaving(true)
+    setSaveMsg('')
+    try {
+      await updateSettings(form)
+      setSaveMsg('Settings saved')
+      setTimeout(() => setSaveMsg(''), 2500)
+    } catch {
+      setSaveMsg('Save failed')
+      setTimeout(() => setSaveMsg(''), 2500)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const userColumns: Column<User>[] = [
@@ -57,8 +67,8 @@ export function SettingsPage() {
               <Input value={form.defaultBankAccount} onChange={(e) => setForm({ ...form, defaultBankAccount: e.target.value })} />
             </Field>
             <div className="flex items-center gap-3 pt-2">
-              <Button onClick={save}><Save size={16} /> Save Settings</Button>
-              {saveMsg && <span className="text-sm text-emerald-600">{saveMsg}</span>}
+              <Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}</Button>
+              {saveMsg && <span className={`text-sm ${saveMsg === 'Save failed' ? 'text-red-600' : 'text-emerald-600'}`}>{saveMsg}</span>}
             </div>
           </div>
         </Card>
@@ -77,7 +87,7 @@ export function SettingsPage() {
             <div className="flex gap-1 justify-end">
               <button onClick={() => setEditUser(u)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
               {u.userID !== 'USR-0001' && (
-                <button onClick={() => { if (confirm(`Delete user ${u.name}?`)) deleteUser(u.userID) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
+                <button onClick={() => { if (confirm(`Delete user ${u.name}?`)) void deleteUser(u.userID).catch(() => {}) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
               )}
             </div>
           )}
@@ -143,17 +153,26 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
     name: '', email: '', role: 'viewer', status: 'active', password: '',
   }, ...initial })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name?.trim() || !form.email?.trim()) return setError('Name and email are required')
     if (!initial?.userID && !form.password) return setError('Password is required for new users')
-    if (initial?.userID) {
-      updateUser(form as User)
-    } else {
-      addUser(form as Omit<User, 'userID' | 'createdDate'>)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.userID) {
+        await updateUser(form as User)
+      } else {
+        await addUser(form as Omit<User, 'userID' | 'createdDate'>)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save user')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -180,7 +199,7 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
       </Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onDone} type="button">Cancel</Button>
-        <Button type="submit">{initial?.userID ? 'Save Changes' : 'Add User'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.userID ? 'Save Changes' : 'Add User'}</Button>
       </div>
     </form>
   )

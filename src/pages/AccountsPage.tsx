@@ -69,21 +69,31 @@ export function AccountsPage() {
 
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Account">
         <AccountForm
-          onDone={(a) => { addAccount(a); setShowAdd(false) }}
+          onDone={async (a) => { await addAccount(a); setShowAdd(false) }}
+          onClose={() => setShowAdd(false)}
         />
       </Modal>
     </div>
   )
 }
 
-function AccountForm({ onDone }: { onDone: (a: Omit<Account, 'accountID'>) => void }) {
+function AccountForm({ onDone, onClose }: { onDone: (a: Omit<Account, 'accountID'>) => Promise<void>; onClose: () => void }) {
   const [form, setForm] = useState({ accountName: '', openingBalance: 0, currentBalance: 0, type: 'bank', notes: '' })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.accountName.trim()) return setError('Account name is required')
-    onDone({ ...form, openingBalance: Number(form.openingBalance) || 0, currentBalance: Number(form.currentBalance) || 0 } as Omit<Account, 'accountID'>)
+    setError('')
+    setSaving(true)
+    try {
+      await onDone({ ...form, openingBalance: Number(form.openingBalance) || 0, currentBalance: Number(form.currentBalance) || 0 } as Omit<Account, 'accountID'>)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save account')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -108,8 +118,8 @@ function AccountForm({ onDone }: { onDone: (a: Omit<Account, 'accountID'>) => vo
       </Field>
       <Field label="Notes"><Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
       <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" onClick={() => onDone({} as Omit<Account, 'accountID'>)} type="button">Cancel</Button>
-        <Button type="submit">Add Account</Button>
+        <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add Account'}</Button>
       </div>
     </form>
   )

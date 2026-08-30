@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
 import type {
@@ -17,6 +18,28 @@ import type {
   Vendor,
 } from '../types'
 
+interface ToastItem {
+  id: number
+  type: 'success' | 'error'
+  message: string
+}
+
+const AppContext = createContext<AppContextValue | null>(null)
+
+const CONFIG_USE_LIVE = !CONFIG.useMockData && !!CONFIG.webAppUrl
+
+let seq = 100
+let toastSeq = 0
+
+function nextSeq() {
+  seq += 1
+  return seq
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : 'Something went wrong'
+}
+
 interface AppContextValue {
   user: User | null
   login: (email: string, password: string) => Promise<string | null>
@@ -25,7 +48,7 @@ interface AppContextValue {
 
   loading: boolean
   settings: Settings
-  updateSettings: (s: Settings) => void
+  updateSettings: (s: Settings) => Promise<void>
 
   donors: Person[]
   people: Person[]
@@ -40,51 +63,40 @@ interface AppContextValue {
   auditLog: AuditLogEntry[]
   dashboard: DashboardData
 
-  addDonation: (d: Omit<Donation, 'donationID' | 'receiptNumber'>) => Donation
-  updateDonation: (d: Donation) => void
-  softDeleteDonation: (id: string) => void
-  bulkAddDonations: (items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>) => Donation[]
+  addDonation: (d: Omit<Donation, 'donationID' | 'receiptNumber'>) => Promise<Donation>
+  updateDonation: (d: Donation) => Promise<void>
+  softDeleteDonation: (id: string) => Promise<void>
+  bulkAddDonations: (items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>) => Promise<Donation[]>
 
-  addExpense: (e: Omit<Expense, 'expenseID'>) => Expense
-  updateExpense: (e: Expense) => void
-  softDeleteExpense: (id: string) => void
-  bulkAddExpenses: (items: Array<Omit<Expense, 'expenseID'>>) => Expense[]
+  addExpense: (e: Omit<Expense, 'expenseID'>) => Promise<Expense>
+  updateExpense: (e: Expense) => Promise<void>
+  softDeleteExpense: (id: string) => Promise<void>
+  bulkAddExpenses: (items: Array<Omit<Expense, 'expenseID'>>) => Promise<Expense[]>
 
-  addPerson: (p: Omit<Person, 'personID'>) => Person
-  updatePerson: (p: Person) => void
-  deletePerson: (id: string) => void
-  bulkAddPeople: (items: Array<Omit<Person, 'personID'>>) => Person[]
+  addPerson: (p: Omit<Person, 'personID'>) => Promise<Person>
+  updatePerson: (p: Person) => Promise<void>
+  deletePerson: (id: string) => Promise<void>
+  bulkAddPeople: (items: Array<Omit<Person, 'personID'>>) => Promise<Person[]>
 
-  addVendor: (v: Omit<Vendor, 'vendorID'>) => Vendor
-  updateVendor: (v: Vendor) => void
-  deleteVendor: (id: string) => void
-  bulkAddVendors: (items: Array<Omit<Vendor, 'vendorID'>>) => Vendor[]
+  addVendor: (v: Omit<Vendor, 'vendorID'>) => Promise<Vendor>
+  updateVendor: (v: Vendor) => Promise<void>
+  deleteVendor: (id: string) => Promise<void>
+  bulkAddVendors: (items: Array<Omit<Vendor, 'vendorID'>>) => Promise<Vendor[]>
 
-  addProject: (p: Omit<Project, 'projectID'>) => Project
-  updateProject: (p: Project) => void
+  addProject: (p: Omit<Project, 'projectID'>) => Promise<Project>
+  updateProject: (p: Project) => Promise<void>
 
-  addPendingPayment: (p: Omit<PendingPayment, 'paymentID'>) => PendingPayment
-  updatePendingPayment: (p: PendingPayment) => void
+  addPendingPayment: (p: Omit<PendingPayment, 'paymentID'>) => Promise<PendingPayment>
+  updatePendingPayment: (p: PendingPayment) => Promise<void>
 
-  addAccount: (a: Omit<Account, 'accountID'>) => Account
-  updateAccount: (a: Account) => void
+  addAccount: (a: Omit<Account, 'accountID'>) => Promise<Account>
+  updateAccount: (a: Account) => Promise<void>
 
-  addUser: (u: Omit<User, 'userID' | 'createdDate'>) => User
-  updateUser: (u: User) => void
-  deleteUser: (id: string) => void
+  addUser: (u: Omit<User, 'userID' | 'createdDate'>) => Promise<User>
+  updateUser: (u: User) => Promise<void>
+  deleteUser: (id: string) => Promise<void>
 
-  addTransaction: (t: Omit<Transaction, 'transactionID'>) => Transaction
-}
-
-const AppContext = createContext<AppContextValue | null>(null)
-
-const CONFIG_USE_LIVE = !CONFIG.useMockData && !!CONFIG.webAppUrl
-
-let seq = 100
-
-function nextSeq() {
-  seq += 1
-  return seq
+  addTransaction: (t: Omit<Transaction, 'transactionID'>) => Promise<Transaction>
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -112,46 +124,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currency: 'INR',
   })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+
+  const notify = (type: 'success' | 'error', message: string) => {
+    const id = ++toastSeq
+    setToasts((prev) => [...prev.slice(-3), { id, type, message }])
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 4500)
+  }
+
+  async function refreshAll(): Promise<void> {
+    const [u, p, d, e, v, pr, pp, ac, t, s] = await Promise.all([
+      dataService.getUsers(),
+      dataService.getPeople(),
+      dataService.getDonations(),
+      dataService.getExpenses(),
+      dataService.getVendors(),
+      dataService.getProjects(),
+      dataService.getPendingPayments(),
+      dataService.getAccounts(),
+      dataService.getTransactions(),
+      dataService.getSettings(),
+    ])
+    setUsers(u)
+    setPeople(p)
+    setDonations(d)
+    setExpenses(e)
+    setVendors(v)
+    setProjects(pr)
+    setPendingPayments(pp)
+    setAccounts(ac)
+    setTransactions(t)
+    setSettings(s)
+    const dash = await dataService.getDashboard()
+    setDashboard(dash)
+  }
+
+  async function refreshAllSafe() {
+    try {
+      await refreshAll()
+    } catch {
+      // best-effort re-sync after a failed write; errors already notified
+    }
+  }
 
   useEffect(() => {
     let active = true
-    async function loadAll() {
+    ;(async () => {
       try {
-        const [u, p, d, e, v, pr, pp, ac, t, s] = await Promise.all([
-          dataService.getUsers(),
-          dataService.getPeople(),
-          dataService.getDonations(),
-          dataService.getExpenses(),
-          dataService.getVendors(),
-          dataService.getProjects(),
-          dataService.getPendingPayments(),
-          dataService.getAccounts(),
-          dataService.getTransactions(),
-          dataService.getSettings(),
-        ])
-        if (!active) return
-        setUsers(u)
-        setPeople(p)
-        setDonations(d)
-        setExpenses(e)
-        setVendors(v)
-        setProjects(pr)
-        setPendingPayments(pp)
-        setAccounts(ac)
-        setTransactions(t)
-        setSettings(s)
-        const dash = await dataService.getDashboard()
-        if (active) setDashboard(dash)
+        await refreshAll()
       } catch (err) {
         console.error('Failed to load app data', err)
       } finally {
         if (active) setLoading(false)
       }
-    }
-    loadAll()
+    })()
     return () => {
       active = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const audit = (action: string, module: string, recordID: string, newValue = '') => {
@@ -179,7 +211,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         resolve(msg)
       }
       if (!CONFIG_USE_LIVE) {
-        // Local demo: match against loaded users
         setTimeout(() => {
           const found = users.find(
             (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
@@ -217,25 +248,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ---- Donations ----
-  function addDonation(d: Omit<Donation, 'donationID' | 'receiptNumber'>): Donation {
+  async function addDonation(d: Omit<Donation, 'donationID' | 'receiptNumber'>): Promise<Donation> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('donations', 'create', { ...d })) as Donation
+        notify('success', 'Donation saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
-    const id = run
     const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
-    const donation: Donation = { ...d, donationID: id, receiptNumber: receipt, createdAt: new Date().toISOString() }
+    const donation: Donation = { ...d, donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() }
     setDonations((prev) => [donation, ...prev])
-    audit('Create', 'Donations', id)
+    audit('Create', 'Donations', run)
     return donation
   }
-  function updateDonation(d: Donation) {
+  async function updateDonation(d: Donation): Promise<void> {
     setDonations((prev) => prev.map((x) => (x.donationID === d.donationID ? { ...x, ...d } : x)))
-    audit('Update', 'Donations', d.donationID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('donations', 'update', d)
+        notify('success', 'Donation updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Donations', d.donationID)
+    }
   }
-  function softDeleteDonation(id: string) {
+  async function softDeleteDonation(id: string): Promise<void> {
     setDonations((prev) => prev.map((x) => (x.donationID === id ? { ...x, deleted: true } : x)))
-    audit('SoftDelete', 'Donations', id)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('donations', 'softDelete', { donationID: id })
+        notify('success', 'Donation marked as cancelled')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('SoftDelete', 'Donations', id)
+    }
   }
 
-  function bulkAddDonations(items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>): Donation[] {
+  async function bulkAddDonations(items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>): Promise<Donation[]> {
+    if (CONFIG_USE_LIVE) {
+      const created: Donation[] = []
+      try {
+        for (const item of items) {
+          created.push((await dataService.persist('donations', 'create', item)) as Donation)
+        }
+        notify('success', `${created.length} donation${created.length === 1 ? '' : 's'} saved`)
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const created = items.map((d) => {
       const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
       const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
@@ -247,23 +328,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ---- Expenses ----
-  function addExpense(e: Omit<Expense, 'expenseID'>): Expense {
+  async function addExpense(e: Omit<Expense, 'expenseID'>): Promise<Expense> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('expenses', 'create', { ...e })) as Expense
+        notify('success', 'Expense saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `EXP-2026-${String(nextSeq()).padStart(4, '0')}`
     const expense: Expense = { ...e, expenseID: id, createdAt: new Date().toISOString() }
     setExpenses((prev) => [expense, ...prev])
     audit('Create', 'Expenses', id)
     return expense
   }
-  function updateExpense(e: Expense) {
+  async function updateExpense(e: Expense): Promise<void> {
     setExpenses((prev) => prev.map((x) => (x.expenseID === e.expenseID ? { ...x, ...e } : x)))
-    audit('Update', 'Expenses', e.expenseID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('expenses', 'update', e)
+        notify('success', 'Expense updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Expenses', e.expenseID)
+    }
   }
-  function softDeleteExpense(id: string) {
+  async function softDeleteExpense(id: string): Promise<void> {
     setExpenses((prev) => prev.map((x) => (x.expenseID === id ? { ...x, deleted: true } : x)))
-    audit('SoftDelete', 'Expenses', id)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('expenses', 'softDelete', { expenseID: id })
+        notify('success', 'Expense marked as cancelled')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('SoftDelete', 'Expenses', id)
+    }
   }
 
-  function bulkAddExpenses(items: Array<Omit<Expense, 'expenseID'>>): Expense[] {
+  async function bulkAddExpenses(items: Array<Omit<Expense, 'expenseID'>>): Promise<Expense[]> {
+    if (CONFIG_USE_LIVE) {
+      const created: Expense[] = []
+      try {
+        for (const item of items) {
+          created.push((await dataService.persist('expenses', 'create', item)) as Expense)
+        }
+        notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const created = items.map((e) => ({
       ...e,
       expenseID: `EXP-2026-${String(nextSeq()).padStart(4, '0')}`,
@@ -275,23 +407,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ---- People ----
-  function addPerson(p: Omit<Person, 'personID'>): Person {
+  async function addPerson(p: Omit<Person, 'personID'>): Promise<Person> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('people', 'create', { ...p })) as Person
+        notify('success', 'Person saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `PER-${String(nextSeq()).padStart(4, '0')}`
     const person: Person = { ...p, personID: id }
     setPeople((prev) => [...prev, person])
     audit('Create', 'People', id)
     return person
   }
-  function updatePerson(p: Person) {
+  async function updatePerson(p: Person): Promise<void> {
     setPeople((prev) => prev.map((x) => (x.personID === p.personID ? { ...x, ...p } : x)))
-    audit('Update', 'People', p.personID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('people', 'update', p)
+        notify('success', 'Person updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'People', p.personID)
+    }
   }
-  function deletePerson(id: string) {
+  async function deletePerson(id: string): Promise<void> {
     setPeople((prev) => prev.filter((x) => x.personID !== id))
-    audit('Delete', 'People', id)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('people', 'delete', { personID: id })
+        notify('success', 'Person deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'People', id)
+    }
   }
 
-  function bulkAddPeople(items: Array<Omit<Person, 'personID'>>): Person[] {
+  async function bulkAddPeople(items: Array<Omit<Person, 'personID'>>): Promise<Person[]> {
+    if (CONFIG_USE_LIVE) {
+      const created: Person[] = []
+      try {
+        for (const item of items) {
+          created.push((await dataService.persist('people', 'create', item)) as Person)
+        }
+        notify('success', `${created.length} person${created.length === 1 ? '' : 's'} saved`)
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const created = items.map((p) => ({ ...p, personID: `PER-${String(nextSeq()).padStart(4, '0')}` }))
     setPeople((prev) => [...prev, ...created])
     audit('BulkCreate', 'People', `${created.length} records`, `${created.map((c) => c.personID).join(', ')}`)
@@ -299,23 +482,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ---- Vendors ----
-  function addVendor(v: Omit<Vendor, 'vendorID'>): Vendor {
+  async function addVendor(v: Omit<Vendor, 'vendorID'>): Promise<Vendor> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('vendors', 'create', { ...v })) as Vendor
+        notify('success', 'Vendor saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `VEN-${String(nextSeq()).padStart(4, '0')}`
     const vendor: Vendor = { ...v, vendorID: id }
     setVendors((prev) => [...prev, vendor])
     audit('Create', 'Vendors', id)
     return vendor
   }
-  function updateVendor(v: Vendor) {
+  async function updateVendor(v: Vendor): Promise<void> {
     setVendors((prev) => prev.map((x) => (x.vendorID === v.vendorID ? { ...x, ...v } : x)))
-    audit('Update', 'Vendors', v.vendorID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('vendors', 'update', v)
+        notify('success', 'Vendor updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Vendors', v.vendorID)
+    }
   }
-  function deleteVendor(id: string) {
+  async function deleteVendor(id: string): Promise<void> {
     setVendors((prev) => prev.filter((x) => x.vendorID !== id))
-    audit('Delete', 'Vendors', id)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('vendors', 'delete', { vendorID: id })
+        notify('success', 'Vendor deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Vendors', id)
+    }
   }
 
-  function bulkAddVendors(items: Array<Omit<Vendor, 'vendorID'>>): Vendor[] {
+  async function bulkAddVendors(items: Array<Omit<Vendor, 'vendorID'>>): Promise<Vendor[]> {
+    if (CONFIG_USE_LIVE) {
+      const created: Vendor[] = []
+      try {
+        for (const item of items) {
+          created.push((await dataService.persist('vendors', 'create', item)) as Vendor)
+        }
+        notify('success', `${created.length} vendor${created.length === 1 ? '' : 's'} saved`)
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const created = items.map((v) => ({ ...v, vendorID: `VEN-${String(nextSeq()).padStart(4, '0')}` }))
     setVendors((prev) => [...prev, ...created])
     audit('BulkCreate', 'Vendors', `${created.length} records`, `${created.map((c) => c.vendorID).join(', ')}`)
@@ -323,62 +557,182 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ---- Projects ----
-  function addProject(p: Omit<Project, 'projectID'>): Project {
+  async function addProject(p: Omit<Project, 'projectID'>): Promise<Project> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('projects', 'create', { ...p })) as Project
+        notify('success', 'Project saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `PRJ-${String(nextSeq()).padStart(4, '0')}`
     const project: Project = { ...p, projectID: id }
     setProjects((prev) => [...prev, project])
     audit('Create', 'Projects', id)
     return project
   }
-  function updateProject(p: Project) {
+  async function updateProject(p: Project): Promise<void> {
     setProjects((prev) => prev.map((x) => (x.projectID === p.projectID ? { ...x, ...p } : x)))
-    audit('Update', 'Projects', p.projectID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('projects', 'update', p)
+        notify('success', 'Project updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Projects', p.projectID)
+    }
   }
 
   // ---- Pending Payments ----
-  function addPendingPayment(p: Omit<PendingPayment, 'paymentID'>): PendingPayment {
+  async function addPendingPayment(p: Omit<PendingPayment, 'paymentID'>): Promise<PendingPayment> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('pendingPayments', 'create', { ...p })) as PendingPayment
+        notify('success', 'Payment recorded')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `PAY-${String(nextSeq()).padStart(4, '0')}`
     const pp: PendingPayment = { ...p, paymentID: id }
     setPendingPayments((prev) => [...prev, pp])
     audit('Create', 'Pending Payments', id)
     return pp
   }
-  function updatePendingPayment(p: PendingPayment) {
+  async function updatePendingPayment(p: PendingPayment): Promise<void> {
     setPendingPayments((prev) => prev.map((x) => (x.paymentID === p.paymentID ? { ...x, ...p } : x)))
-    audit('Update', 'Pending Payments', p.paymentID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('pendingPayments', 'update', p)
+        notify('success', 'Payment updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Pending Payments', p.paymentID)
+    }
   }
 
   // ---- Accounts ----
-  function addAccount(a: Omit<Account, 'accountID'>): Account {
+  async function addAccount(a: Omit<Account, 'accountID'>): Promise<Account> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('accounts', 'create', { ...a })) as Account
+        notify('success', 'Account saved')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `ACC-${String(nextSeq()).padStart(4, '0')}`
     const account: Account = { ...a, accountID: id }
     setAccounts((prev) => [...prev, account])
     audit('Create', 'Accounts', id)
     return account
   }
-  function updateAccount(a: Account) {
+  async function updateAccount(a: Account): Promise<void> {
     setAccounts((prev) => prev.map((x) => (x.accountID === a.accountID ? { ...x, ...a } : x)))
-    audit('Update', 'Accounts', a.accountID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('accounts', 'update', a)
+        notify('success', 'Account updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Accounts', a.accountID)
+    }
   }
 
   // ---- Users ----
-  function addUser(u: Omit<User, 'userID' | 'createdDate'>): User {
+  async function addUser(u: Omit<User, 'userID' | 'createdDate'>): Promise<User> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('users', 'create', { ...u })) as User
+        notify('success', 'User created')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `USR-${String(nextSeq()).padStart(4, '0')}`
     const nu: User = { ...u, userID: id, createdDate: new Date().toISOString().slice(0, 10) }
     setUsers((prev) => [...prev, nu])
     audit('Create', 'Users', id)
     return nu
   }
-  function updateUser(u: User) {
+  async function updateUser(u: User): Promise<void> {
     setUsers((prev) => prev.map((x) => (x.userID === u.userID ? { ...x, ...u } : x)))
-    audit('Update', 'Users', u.userID)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('users', 'update', u)
+        notify('success', 'User updated')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Users', u.userID)
+    }
   }
-  function deleteUser(id: string) {
+  async function deleteUser(id: string): Promise<void> {
     setUsers((prev) => prev.filter((x) => x.userID !== id))
-    audit('Delete', 'Users', id)
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.persist('users', 'delete', { userID: id })
+        notify('success', 'User deleted')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Delete', 'Users', id)
+    }
   }
 
-  function addTransaction(t: Omit<Transaction, 'transactionID'>): Transaction {
+  async function addTransaction(t: Omit<Transaction, 'transactionID'>): Promise<Transaction> {
+    if (CONFIG_USE_LIVE) {
+      try {
+        const created = (await dataService.persist('transactions', 'create', { ...t })) as Transaction
+        notify('success', 'Transaction recorded')
+        await refreshAll()
+        return created
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    }
     const id = `TXN-2026-${String(nextSeq()).padStart(4, '0')}`
     const tx: Transaction = { ...t, transactionID: id }
     setTransactions((prev) => [tx, ...prev])
@@ -386,9 +740,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return tx
   }
 
-  function updateSettings(s: Settings) {
+  async function updateSettings(s: Settings): Promise<void> {
     setSettings(s)
-    audit('Update', 'Settings', 'settings')
+    if (CONFIG_USE_LIVE) {
+      try {
+        await dataService.saveSettings(s)
+        notify('success', 'Settings saved')
+        await refreshAll()
+      } catch (err) {
+        notify('error', errMsg(err))
+        await refreshAllSafe()
+        throw err
+      }
+    } else {
+      audit('Update', 'Settings', 'settings')
+    }
   }
 
   const value: AppContextValue = {
@@ -439,7 +805,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addTransaction,
   }
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+      <ToastViewport toastList={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
+    </AppContext.Provider>
+  )
+}
+
+function ToastViewport({ toastList, onDismiss }: { toastList: ToastItem[]; onDismiss: (id: number) => void }) {
+  if (toastList.length === 0) return null
+  return (
+    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-[calc(100vw-2rem)] sm:max-w-sm">
+      {toastList.map((t) => (
+        <div
+          key={t.id}
+          role="status"
+          className={`flex items-start gap-2.5 px-4 py-3 rounded-xl shadow-lg border text-sm bg-white ${
+            t.type === 'success' ? 'border-emerald-200 text-emerald-800' : 'border-red-200 text-red-800'
+          }`}
+        >
+          {t.type === 'success' ? (
+            <CheckCircle2 size={18} className="text-emerald-500 mt-0.5 shrink-0" />
+          ) : (
+            <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
+          )}
+          <span className="flex-1 min-w-0 break-words font-medium">{t.message}</span>
+          <button onClick={() => onDismiss(t.id)} className="p-0.5 rounded hover:bg-slate-100 text-slate-400 shrink-0">
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function useApp() {

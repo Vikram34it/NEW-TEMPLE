@@ -163,18 +163,26 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
   const [role, setRole] = useState<Role>('viewer')
   const [error, setError] = useState('')
   const [ok, setOk] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setOk('')
     if (!name.trim() || !email.trim() || !password) return setError('Name, email and password are required')
-    addUser({ name: name.trim(), email: email.trim(), password, role, status: 'active' })
-    setOk('User created. They can now sign in with the password you set.')
-    setName('')
-    setEmail('')
-    setPassword('')
-    setRole('viewer')
+    setSaving(true)
+    try {
+      await addUser({ name: name.trim(), email: email.trim(), password, role, status: 'active' })
+      setOk('User created. They can now sign in with the password you set.')
+      setName('')
+      setEmail('')
+      setPassword('')
+      setRole('viewer')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -194,7 +202,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
       </Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onDone} type="button">Cancel</Button>
-        <Button type="submit">Add User</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Creating…' : 'Add User'}</Button>
       </div>
     </form>
   )

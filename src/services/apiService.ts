@@ -15,9 +15,10 @@ import type {
 } from '../types'
 
 // A lightweight, mock-safe data layer. When the Apps Script backend URL is
-// configured (useMockData = false), every "load" call fetches from the API.
-// When not configured, it returns bundled sample data so the UI can be
-// developed and demoed fully offline.
+// configured (useMockData = false), every "load" call fetches from the API and
+// every mutation writes back to the spreadsheet. When not configured, it
+// returns bundled sample data so the UI can be developed and demoed fully
+// offline.
 
 type RecordName =
   | 'users'
@@ -32,16 +33,24 @@ type RecordName =
   | 'settings'
   | 'auditLog'
 
+type MutateOp = 'create' | 'update' | 'softDelete' | 'delete'
+
+// Optional token sent to the backend (e.g. the API_KEY from Apps Script).
+// Configure it via an environment variable at build time where appropriate.
+const TOKEN = import.meta.env.VITE_API_TOKEN || ''
+
 async function apiFetch(path: string, params: Record<string, string> = {}, body?: unknown) {
   if (!CONFIG.webAppUrl) {
     throw new Error('API not configured')
   }
   const qs = new URLSearchParams(params).toString()
   const url = `${CONFIG.webAppUrl}?action=${path}${qs ? `&${qs}` : ''}${TOKEN ? `&token=${TOKEN}` : ''}`
-  const res = await fetch(url, body ? {
-    method: 'POST',
-    body: JSON.stringify(body),
-  } : undefined)
+  const res = await fetch(url, body
+    ? {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    : undefined)
   if (!res.ok) throw new Error(`API error ${res.status}`)
   const json = await res.json()
   if (json.success === false) {
@@ -57,6 +66,7 @@ async function apiFetch(path: string, params: Record<string, string> = {}, body?
 function toCamel<T>(obj: Record<string, unknown>): T {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) {
+    if (k.startsWith('_')) continue // skip internal keys such as _row
     const key = k.charAt(0).toLowerCase() + k.slice(1)
     let val = v
     if (key === 'deleted' && typeof val === 'string') {
@@ -69,9 +79,75 @@ function toCamel<T>(obj: Record<string, unknown>): T {
   return out as T
 }
 
-// Optional token sent to the backend (e.g. the API_KEY from Apps Script).
-// Configure it via an environment variable at build time where appropriate.
-const TOKEN = import.meta.env.VITE_API_TOKEN || ''
+function toCamelAny(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((r) => toCamel(r as Record<string, unknown>))
+  if (value && typeof value === 'object') return toCamel(value as Record<string, unknown>)
+  return value
+}
+
+// Per-record metadata: which backend actions to call, which field holds the
+// id, which fields the server generates on create (so we must NOT send them),
+// and any frontend-key -> spreadsheet-header renames that differ from a
+// simple first-letter-capitalisation.
+interface RecordMeta {
+  idField: string
+  create?: string
+  update?: string
+  softDelete?: string
+  hardDelete?: string
+  skipOnCreate?: string[]
+  aliases?: Record<string, string>
+}
+
+const RECORD_META: Record<RecordName, RecordMeta> = {
+  users: { idField: 'userID', create: 'createUser', update: 'updateUser', hardDelete: 'deleteUser' },
+  people: { idField: 'personID', create: 'createPerson', update: 'updatePerson', hardDelete: 'deletePerson' },
+  donations: {
+    idField: 'donationID',
+    create: 'createDonation',
+    update: 'updateDonation',
+    softDelete: 'softDeleteDonation',
+    skipOnCreate: ['donationID', 'receiptNumber', 'createdAt', 'updatedAt'],
+  },
+  expenses: {
+    idField: 'expenseID',
+    create: 'createExpense',
+    update: 'updateExpense',
+    softDelete: 'softDeleteExpense',
+    skipOnCreate: ['expenseID', 'createdAt', 'updatedAt'],
+  },
+  vendors: {
+    idField: 'vendorID',
+    create: 'createVendor',
+    update: 'updateVendor',
+    hardDelete: 'deleteVendor',
+    aliases: { gstNumber: 'GSTNumber' },
+  },
+  projects: { idField: 'projectID', create: 'createProject', update: 'updateProject' },
+  pendingPayments: { idField: 'paymentID', create: 'createPayment', update: 'updatePayment' },
+  accounts: { idField: 'accountID', create: 'createAccount', update: 'updateAccount' },
+  transactions: { idField: 'transactionID', create: 'createTransaction' },
+  settings: { idField: '' },
+  auditLog: { idField: '' },
+}
+
+// Convert a frontend camelCase record into the object the backend expects
+// (spreadsheet-header keys). Arrays -> joined strings, booleans -> TRUE/FALSE.
+function serialize(recordName: RecordName, payload: Record<string, unknown>, op: MutateOp): Record<string, unknown> {
+  const meta = RECORD_META[recordName]
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'id' || k.startsWith('_')) continue
+    if (op === 'create' && meta.skipOnCreate?.includes(k)) continue
+    if (v === undefined || v === null) continue
+    let val: unknown = v
+    if (Array.isArray(val)) val = val.join(', ')
+    else if (typeof val === 'boolean') val = val ? 'TRUE' : 'FALSE'
+    const key = (meta.aliases && meta.aliases[k]) || k.charAt(0).toUpperCase() + k.slice(1)
+    out[key] = val
+  }
+  return out
+}
 
 // Generic in-memory store that operates on the mock data when live API is off.
 class MockStore {
@@ -93,75 +169,66 @@ export const api = {
     return mockStore.data[record]
   },
 
-  async save(record: RecordName, action: string, payload: unknown): Promise<unknown> {
+  // Persist a mutation to the backend (live) or the in-memory mock store
+  // (demo). Returns the canonical server record for creates.
+  async mutate(record: RecordName, op: MutateOp, payload: unknown): Promise<unknown> {
+    const meta = RECORD_META[record]
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      return apiFetch(action, { record, payload: JSON.stringify(payload) }, payload)
+      if (record === 'settings') {
+        return apiFetch('updateSettings', {}, { settings: payload })
+      }
+      const action =
+        op === 'create' ? meta.create
+        : op === 'update' ? meta.update
+        : op === 'softDelete' ? meta.softDelete
+        : meta.hardDelete
+      if (!action) throw new Error('This record type does not support that operation')
+
+      let body: unknown
+      if (op === 'create' || op === 'update') {
+        body = { record: serialize(record, payload as Record<string, unknown>, op) }
+      } else {
+        const rec = payload as Record<string, unknown> | undefined
+        const id = rec?.[meta.idField] ?? (rec?.id as string | undefined) ?? (typeof payload === 'string' ? payload : '')
+        if (!id) throw new Error('Missing record ID')
+        body = { id: String(id) }
+      }
+      const data = await apiFetch(action, {}, body)
+      return op === 'create' ? toCamelAny(data) : data
     }
-    // For mock mode, mutations are persisted to localStorage so the demo
-    // remembers changes between refreshes.
-    return persistMock(record, action, payload)
+    return mutateMock(record, op, payload)
   },
 }
 
-function persistMock(record: RecordName, action: string, payload: unknown) {
+function mutateMock(record: RecordName, op: MutateOp, payload: unknown) {
   const store = mockStore.data
-  let result: unknown
-  // Reflection-free manual handling for the records we support mutating.
-  if (record === 'donations') {
-    result = mutateArray(store.donations as Donation[], action, payload as Donation)
-  } else if (record === 'expenses') {
-    result = mutateArray(store.expenses as Expense[], action, payload as Expense)
-  } else if (record === 'people') {
-    result = mutateArray(store.people as Person[], action, payload as Person)
-  } else if (record === 'vendors') {
-    result = mutateArray(store.vendors as Vendor[], action, payload as Vendor)
-  } else if (record === 'projects') {
-    result = mutateArray(store.projects as Project[], action, payload as Project)
-  } else if (record === 'pendingPayments') {
-    result = mutateArray(store.pendingPayments as PendingPayment[], action, payload as PendingPayment)
-  } else if (record === 'accounts') {
-    result = mutateArray(store.accounts as Account[], action, payload as Account)
-  } else if (record === 'transactions') {
-    result = mutateArray(store.transactions as Transaction[], action, payload as Transaction)
-  } else if (record === 'users') {
-    result = mutateArray(store.users as User[], action, payload as User)
-  } else if (record === 'settings') {
-    store.settings = payload as Settings
-    result = store.settings
+  if (record === 'settings') {
+    if (op === 'update') store.settings = payload as Settings
+    return store.settings
   }
-  return result
-}
+  const arr = store[record as keyof typeof store]
+  if (!Array.isArray(arr)) return null
+  const meta = RECORD_META[record]
+  const rec = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>
+  const idKey = meta.idField
+  const id = rec[idKey] ?? rec.id ?? (typeof payload === 'string' ? payload : '')
 
-function mutateArray<T extends object>(arr: T[], action: string, record: T) {
-  const cast = arr as Record<string, unknown>[]
-  const rec = record as Record<string, unknown>
-  const idKey = Object.keys(rec)[0]
-  const id = rec[idKey!] as string
-  if (action === 'create') {
-    arr.push(record)
-    return record
+  if (op === 'create') {
+    ;(arr as unknown[]).push(payload)
+    return payload
   }
-  if (action === 'update') {
-    const idx = cast.findIndex((r) => r[idKey!] === id)
-    if (idx !== -1) {
-      cast[idx] = { ...cast[idx], ...rec }
-      return cast[idx]
-    }
-    return record
+  const cast = arr as unknown as Record<string, unknown>[]
+  const idx = cast.findIndex((r) => r[idKey] === id)
+  if (idx === -1) return null
+  if (op === 'update') {
+    cast[idx] = { ...cast[idx], ...rec }
+    return cast[idx]
   }
-  if (action === 'delete' || action === 'softDelete') {
-    if (action === 'softDelete') {
-      const idx = cast.findIndex((r) => r[idKey!] === id)
-      if (idx !== -1) {
-        cast[idx] = { ...cast[idx], deleted: true }
-        return cast[idx]
-      }
-    } else {
-      const idx = cast.findIndex((r) => r[idKey!] === id)
-      if (idx !== -1) arr.splice(idx, 1)
-    }
-    return null
+  if (op === 'softDelete') {
+    cast[idx] = { ...cast[idx], deleted: true }
+    return cast[idx]
   }
+  arr.splice(idx, 1)
   return null
 }
 
@@ -185,6 +252,16 @@ export const dataService = {
       }
     }
     return null
+  },
+
+  // Write a record to the backend / mock store.
+  persist(record: RecordName, op: MutateOp, payload: unknown): Promise<unknown> {
+    return api.mutate(record, op, payload)
+  },
+
+  // Persist settings (backend or mock).
+  async saveSettings(settings: Settings): Promise<void> {
+    await api.mutate('settings', 'update', settings)
   },
 
   async getUsers(): Promise<User[]> {
@@ -233,3 +310,5 @@ export const dataService = {
     return found
   },
 }
+
+export type { RecordName }

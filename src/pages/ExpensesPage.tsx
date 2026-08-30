@@ -39,7 +39,7 @@ export function ExpensesPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  const handleBulkImport = (rows: Array<Record<string, unknown>>): string | null => {
+  const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
     const items = rows.map((r) => ({
       date: r.date as string,
       category: (r.category as string) || 'Maintenance',
@@ -56,8 +56,12 @@ export function ExpensesPage() {
       paidBy: (r.paidBy as string) || '',
       notes: (r.notes as string) || '',
     }))
-    bulkAddExpenses(items)
-    return null
+    try {
+      await bulkAddExpenses(items)
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to import expenses'
+    }
   }
 
   const filtered = useMemo(() => {
@@ -75,7 +79,7 @@ export function ExpensesPage() {
 
   const handleDelete = (e: Expense) => {
     if (confirm(`Mark expense ${e.expenseID} as cancelled?`)) {
-      softDeleteExpense(e.expenseID)
+      void softDeleteExpense(e.expenseID).catch(() => {})
     }
   }
 

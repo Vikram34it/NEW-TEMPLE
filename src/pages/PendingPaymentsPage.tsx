@@ -104,6 +104,8 @@ function PaymentForm({ initial, vendors, peopleNames, projects, onDone }: {
     date: new Date().toISOString().slice(0, 10), personOrVendor: '', amountDue: 0, amountPaid: 0, remainingAmount: 0,
     dueDate: new Date().toISOString().slice(0, 10), project: '', status: 'pending', notes: '',
   }, ...initial })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = (k: keyof PendingPayment, v: never) => {
     setForm((f) => {
@@ -115,20 +117,30 @@ function PaymentForm({ initial, vendors, peopleNames, projects, onDone }: {
     })
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (initial?.paymentID) {
-      updatePendingPayment({ ...(form as PendingPayment), paymentID: initial.paymentID })
-    } else {
-      addPendingPayment(form as Omit<PendingPayment, 'paymentID'>)
+    if (!form.personOrVendor?.trim()) return setError('Person or vendor is required')
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.paymentID) {
+        await updatePendingPayment({ ...(form as PendingPayment), paymentID: initial.paymentID })
+      } else {
+        await addPendingPayment(form as Omit<PendingPayment, 'paymentID'>)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save payment')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   const allNames = [...new Set([...vendors, ...peopleNames])]
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
       <div className="grid sm:grid-cols-2 gap-4">
         <Field label="Person / Vendor" required>
           <Select value={form.personOrVendor} onChange={(e) => set('personOrVendor', e.target.value as never)}>
@@ -166,7 +178,7 @@ function PaymentForm({ initial, vendors, peopleNames, projects, onDone }: {
       <Field label="Notes"><Input value={form.notes} onChange={(e) => set('notes', e.target.value as never)} placeholder="Notes" /></Field>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.paymentID ? 'Save Changes' : 'Record Payment'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.paymentID ? 'Save Changes' : 'Record Payment'}</Button>
       </div>
     </form>
   )

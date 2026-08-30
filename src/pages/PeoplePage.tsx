@@ -29,7 +29,7 @@ export function PeoplePage() {
   const [showBulk, setShowBulk] = useState(false)
   const [typeFilter, setTypeFilter] = useState('')
 
-  const handleBulkImport = (rows: Array<Record<string, unknown>>): string | null => {
+  const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
     const items = rows.map((r) => {
       const types = (r.personType as string[]) || []
       const cleanTypes = types.filter((t) => PERSON_TYPES.includes(t as never))
@@ -46,8 +46,12 @@ export function PeoplePage() {
         notes: (r.notes as string) || '',
       }
     })
-    bulkAddPeople(items)
-    return null
+    try {
+      await bulkAddPeople(items)
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Failed to import people'
+    }
   }
 
   const filtered = useMemo(() => {
@@ -115,7 +119,7 @@ export function PeoplePage() {
             {can('people:write') && (
               <>
                 <button onClick={() => setEditPerson(p)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
-                <button onClick={() => { if (confirm(`Delete ${p.name}?`)) deletePerson(p.personID) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="Delete"><Trash2 size={15} /></button>
+                <button onClick={() => { if (confirm(`Delete ${p.name}?`)) void deletePerson(p.personID).catch(() => {}) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="Delete"><Trash2 size={15} /></button>
               </>
             )}
           </div>
@@ -176,6 +180,7 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
     ...initial,
   })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = (k: keyof Person, v: never) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -187,16 +192,24 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
     }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name?.trim()) return setError('Name is required')
     if ((form.personType || []).length === 0) return setError('Select at least one person type')
-    if (initial?.personID) {
-      updatePerson({ ...(form as Person), personID: initial.personID })
-    } else {
-      addPerson(form as Omit<Person, 'personID'>)
+    setError('')
+    setSaving(true)
+    try {
+      if (initial?.personID) {
+        await updatePerson({ ...(form as Person), personID: initial.personID })
+      } else {
+        await addPerson(form as Omit<Person, 'personID'>)
+      }
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save person')
+    } finally {
+      setSaving(false)
     }
-    onDone()
   }
 
   return (
@@ -249,7 +262,7 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button type="submit">{initial?.personID ? 'Save Changes' : 'Add Person'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.personID ? 'Save Changes' : 'Add Person'}</Button>
       </div>
     </form>
   )
