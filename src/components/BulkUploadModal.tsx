@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import { Upload, Download, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
+import { Upload, Download, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
 import { Button, Modal } from './ui'
 import { parseDateInput } from '../utils/helpers'
+import { downloadXlsxTemplate, parseXlsxFile } from '../utils/xlsxTemplate'
 
 export interface ImportColumn {
   header: string
@@ -91,49 +92,79 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
     setFileName(file.name)
     setError('')
     setDone(false)
+    const isXlsx = /\.xlsx$/i.test(file.name)
     const reader = new FileReader()
     reader.onload = () => {
-      const text = String(reader.result || '')
-      const matrix = parseCSV(text)
-      if (matrix.length < 2) {
-        setRows(null)
-        setError('The file must contain a header row and at least one data row.')
-        return
-      }
-      const headerRow = matrix[0].map((h) => h.trim().toLowerCase())
-      const colIndex = columns.map((c) => headerRow.indexOf(c.header.toLowerCase()))
-
-      const missingCols = columns
-        .filter((_, i) => colIndex[i] === -1)
-        .map((c) => c.header)
-      if (missingCols.length > 0) {
-        setRows(null)
-        setError(`Missing required column(s): ${missingCols.join(', ')}`)
-        return
-      }
-
-      const parsed = matrix.slice(1).map((cells) => {
-        const values: Record<string, string> = {}
-        columns.forEach((col, i) => {
-          const idx = colIndex[i]
-          values[col.key] = idx !== -1 && idx < cells.length ? cells[idx] : ''
-        })
-        const errors: string[] = []
-        columns.forEach((col) => {
-          const raw = values[col.key]
-          if (col.required && !raw) errors.push(`${col.header} is required`)
-          if (!raw) return
-          if (col.type === 'number' && isNaN(Number(raw))) errors.push(`${col.header} must be a number`)
-          if (col.type === 'date' && !parseDateInput(raw)) errors.push(`${col.header} must be a valid date (dd-mm-yyyy or yyyy-mm-dd)`)
-          if (col.options && col.options.length > 0 && !col.options.includes(raw)) {
-            errors.push(`${col.header} must be one of: ${col.options.join(', ')}`)
+      if (isXlsx) {
+        void (async () => {
+          try {
+            const parsed = await parseXlsxFile(reader.result as ArrayBuffer, columns)
+            if (parsed.length === 0) {
+              setRows(null)
+              setError('The file contains no data rows after the header.')
+              return
+            }
+            setRows(parsed.map((r) => validate(r.values)))
+          } catch (err) {
+            setRows(null)
+            setError(err instanceof Error ? err.message : 'Failed to read the Excel file.')
           }
-        })
-        return { values, errors }
-      })
-      setRows(parsed)
+        })()
+      } else {
+        try {
+          const parsed = parseCsvRows(String(reader.result || ''))
+          if (parsed.length === 0) return
+          setRows(parsed)
+        } catch (err) {
+          setRows(null)
+          setError(err instanceof Error ? err.message : 'Failed to read the file.')
+        }
+      }
     }
-    reader.readAsText(file)
+    if (isXlsx) reader.readAsArrayBuffer(file)
+    else reader.readAsText(file)
+  }
+
+  const parseCsvRows = (text: string): ParsedRow[] => {
+    const matrix = parseCSV(text)
+    if (matrix.length < 2) {
+      setError('The file must contain a header row and at least one data row.')
+      return []
+    }
+    const headerRow = matrix[0].map((h) => h.trim().toLowerCase())
+    const colIndex = columns.map((c) => headerRow.indexOf(c.header.toLowerCase()))
+
+    const missingCols = columns
+      .filter((_, i) => colIndex[i] === -1)
+      .map((c) => c.header)
+    if (missingCols.length > 0) {
+      setError(`Missing required column(s): ${missingCols.join(', ')}`)
+      return []
+    }
+    return matrix.slice(1).map((cells) => {
+      const values: Record<string, string> = {}
+      columns.forEach((col, i) => {
+        const idx = colIndex[i]
+        values[col.key] = idx !== -1 && idx < cells.length ? cells[idx] : ''
+      })
+      return validate(values)
+    })
+  }
+
+  // Validates a row (shared by CSV and Excel paths).
+  const validate = (values: Record<string, string>): ParsedRow => {
+    const errors: string[] = []
+    columns.forEach((col) => {
+      const raw = values[col.key]
+      if (col.required && !raw) errors.push(`${col.header} is required`)
+      if (!raw) return
+      if (col.type === 'number' && isNaN(Number(raw))) errors.push(`${col.header} must be a number`)
+      if (col.type === 'date' && !parseDateInput(raw)) errors.push(`${col.header} must be a valid date (dd-mm-yyyy or yyyy-mm-dd)`)
+      if (col.options && col.options.length > 0 && !col.options.includes(raw)) {
+        errors.push(`${col.header} must be one of: ${col.options.join(', ')}`)
+      }
+    })
+    return { values, errors }
   }
 
   const rowErrors = rows ? rows.filter((r) => r.errors.length > 0).length : 0
@@ -230,19 +261,24 @@ export function BulkUploadModal({ open, onClose, title, description, columns, on
               <input
                 ref={fileRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx"
                 className="hidden"
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
               <div className="border-2 border-dashed border-slate-300 hover:border-orange-400 rounded-xl p-6 text-center transition-colors">
                 <Upload size={24} className="mx-auto text-slate-400 mb-2" />
-                <p className="text-sm font-medium text-slate-700">{fileName || 'Click to choose a CSV file'}</p>
-                <p className="text-xs text-slate-400 mt-1">Supported: .csv (comma or semicolon separated)</p>
+                <p className="text-sm font-medium text-slate-700">{fileName || 'Click to choose a CSV / Excel (.xlsx) file'}</p>
+                <p className="text-xs text-slate-400 mt-1">Supported: .csv or .xlsx</p>
               </div>
             </label>
             <div className="flex flex-col justify-center gap-2">
-              <Button variant="secondary" onClick={downloadTemplate}><Download size={15} /> Download template</Button>
-              <p className="text-[11px] text-slate-400 max-w-[200px]">Use the template to fill your data, then upload it here.</p>
+              <Button variant="secondary" onClick={downloadTemplate}><Download size={15} /> Download CSV template</Button>
+              <Button variant="secondary" onClick={() => void downloadXlsxTemplate({ title, columns })}>
+                <FileSpreadsheet size={15} /> Download Excel template (with dropdowns)
+              </Button>
+              <p className="text-[11px] text-slate-400 max-w-[220px]">
+                Use the Excel template for real dropdowns (donor names, category, etc.), or the CSV template to fill plain text.
+              </p>
             </div>
           </div>
 
