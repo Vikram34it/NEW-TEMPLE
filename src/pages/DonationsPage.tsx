@@ -23,6 +23,9 @@ const DONATION_IMPORT_COLUMNS: ImportColumn[] = [
   { header: 'Payment Method', key: 'paymentMethod', options: [...PAYMENT_METHODS] },
   { header: 'Transaction Reference', key: 'transactionReference' },
   { header: 'Received By', key: 'receivedBy' },
+  { header: 'PAN Number', key: 'panNumber' },
+  { header: 'Aadhaar Number', key: 'aadhaarNumber' },
+  { header: '80G Needed', key: 'need80G', options: ['Yes', 'No', 'TRUE', 'FALSE', 'true', 'false'] },
   { header: 'Notes', key: 'notes' },
 ]
 
@@ -53,6 +56,9 @@ export function DonationsPage() {
       transactionReference: (r.transactionReference as string) || '',
       receivedBy: (r.receivedBy as string) || '',
       receiptNumber: '',
+      panNumber: (r.panNumber as string) || undefined,
+      aadhaarNumber: (r.aadhaarNumber as string) || undefined,
+      need80G: /^(yes|true)$/i.test(String(r.need80G || '')),
       notes: (r.notes as string) || '',
     }))
     try {
@@ -89,6 +95,8 @@ export function DonationsPage() {
     { header: 'Method', accessor: (d: Donation) => d.paymentMethod },
     { header: 'Ref', accessor: (d: Donation) => d.transactionReference },
     { header: 'Receipt', accessor: (d: Donation) => d.receiptNumber },
+    { header: 'PAN', accessor: (d: Donation) => d.panNumber || '' },
+    { header: '80G', accessor: (d: Donation) => (d.need80G ? 'Yes' : 'No') },
     { header: 'Received By', accessor: (d: Donation) => d.receivedBy },
   ]
 
@@ -100,6 +108,8 @@ export function DonationsPage() {
     { header: 'Category', accessor: (d) => <Badge color="blue">{d.category}</Badge>, sortable: true, sortKey: 'category' },
     { header: 'Method', accessor: (d) => d.paymentMethod },
     { header: 'Receipt', accessor: (d) => d.receiptNumber },
+    { header: 'PAN', accessor: (d) => d.panNumber || '—' },
+    { header: '80G', accessor: (d) => (d.need80G ? <Badge color="green">Yes</Badge> : 'No') },
     { header: 'Received By', accessor: (d) => d.receivedBy },
   ]
 

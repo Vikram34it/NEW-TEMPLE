@@ -22,6 +22,9 @@ interface DonationLike {
   transactionReference: string
   receivedBy: string
   notes: string
+  panNumber?: string
+  aadhaarNumber?: string
+  need80G: boolean
 }
 
 const empty: DonationLike = {
@@ -38,6 +41,9 @@ const empty: DonationLike = {
   transactionReference: '',
   receivedBy: '',
   notes: '',
+  panNumber: '',
+  aadhaarNumber: '',
+  need80G: false,
 }
 
 export function DonationForm({ initial, onDone }: Props) {
@@ -94,6 +100,8 @@ export function DonationForm({ initial, onDone }: Props) {
                 set('phone', donor.phone)
                 set('email', donor.email)
                 set('address', donor.address)
+                set('panNumber', donor.panNumber || '')
+                set('aadhaarNumber', donor.aadhaarNumber || '')
               } else {
                 if (name === '') set('phone', '')
               }
@@ -125,6 +133,28 @@ export function DonationForm({ initial, onDone }: Props) {
           <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Address" />
         </Field>
       </div>
+
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="PAN Number" hint="Required for an 80G tax-exemption receipt">
+          <Input value={form.panNumber} onChange={(e) => set('panNumber', e.target.value)} placeholder="ABCDE1234F" />
+        </Field>
+        <Field label="Aadhaar Number">
+          <Input value={form.aadhaarNumber} onChange={(e) => set('aadhaarNumber', e.target.value)} placeholder="12-digit number" maxLength={12} />
+        </Field>
+      </div>
+
+      <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={form.need80G}
+          onChange={(e) => set('need80G', e.target.checked)}
+          className="w-4 h-4 accent-orange-600"
+        />
+        <div>
+          <p className="text-sm font-medium text-slate-700">Donor needs a tax-exemption (80G) receipt</p>
+          <p className="text-xs text-slate-400">Tick this if the donor wants a receipt with PAN for income-tax deduction.</p>
+        </div>
+      </label>
 
       <div className="grid sm:grid-cols-2 gap-4">
         <Field label="Amount (₹)" required>

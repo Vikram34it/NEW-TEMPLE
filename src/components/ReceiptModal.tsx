@@ -71,6 +71,18 @@ export function ReceiptModal({
                     <td className="py-2 border-b border-dashed border-slate-300 text-slate-700">{donation.address}</td>
                   </tr>
                 )}
+                {donation.panNumber && (
+                  <tr>
+                    <td className="py-2 pr-2 align-top text-slate-500">PAN</td>
+                    <td className="py-2 border-b border-dashed border-slate-300 text-slate-700">{donation.panNumber}</td>
+                  </tr>
+                )}
+                {donation.aadhaarNumber && (
+                  <tr>
+                    <td className="py-2 pr-2 align-top text-slate-500">Aadhaar</td>
+                    <td className="py-2 border-b border-dashed border-slate-300 text-slate-700">{donation.aadhaarNumber}</td>
+                  </tr>
+                )}
                 <tr>
                   <td className="py-2 pr-2 align-top text-slate-500">Amount</td>
                   <td className="py-2 border-b border-dashed border-slate-300">
@@ -104,6 +116,12 @@ export function ReceiptModal({
                 <div className="mt-6 w-44 border-t border-slate-400 pt-1 text-xs text-slate-500">Signature</div>
               </div>
             </div>
+
+            {donation.need80G && (
+              <p className="mt-4 text-[11px] text-slate-500 border-t border-slate-200 pt-2">
+                This donation is covered under Section 80G of the Income-tax Act, 1961 and is eligible for tax exemption.
+              </p>
+            )}
           </div>
         </div>
 

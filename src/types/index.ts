@@ -24,6 +24,8 @@ export interface Person {
   birthday?: string
   anniversary?: string
   preferredChannel?: string
+  panNumber?: string
+  aadhaarNumber?: string
 }
 
 export interface Communication {
@@ -55,6 +57,9 @@ export interface Donation {
   receivedBy: string
   receiptNumber: string
   notes: string
+  panNumber?: string
+  aadhaarNumber?: string
+  need80G?: boolean
   createdAt?: string
   updatedAt?: string
   deleted?: boolean

@@ -77,10 +77,11 @@ async function apiFetch(path: string, params: Record<string, string> = {}, body?
 // record read from the API so the app can consume it as-is.
 function toCamel<T>(obj: Record<string, unknown>): T {
   const out: Record<string, unknown> = {}
-  const boolKeys = ['deleted', 'pinned', 'read', 'deletedBySender', 'deletedByRecipient']
+  const boolKeys = ['deleted', 'pinned', 'read', 'deletedBySender', 'deletedByRecipient', 'need80G']
   for (const [k, v] of Object.entries(obj)) {
     if (k.startsWith('_')) continue // skip internal keys such as _row
-    const key = k.charAt(0).toLowerCase() + k.slice(1)
+    let key = k.charAt(0).toLowerCase() + k.slice(1)
+    if (k === 'PANNumber') key = 'panNumber'
     let val = v
     if (boolKeys.includes(key) && typeof val === 'string') {
       val = /^true$/i.test(val)
@@ -114,13 +115,20 @@ interface RecordMeta {
 
 const RECORD_META: Record<RecordName, RecordMeta> = {
   users: { idField: 'userID', create: 'createUser', update: 'updateUser', hardDelete: 'deleteUser' },
-  people: { idField: 'personID', create: 'createPerson', update: 'updatePerson', hardDelete: 'deletePerson' },
+  people: {
+    idField: 'personID',
+    create: 'createPerson',
+    update: 'updatePerson',
+    hardDelete: 'deletePerson',
+    aliases: { panNumber: 'PANNumber' },
+  },
   donations: {
     idField: 'donationID',
     create: 'createDonation',
     update: 'updateDonation',
     softDelete: 'softDeleteDonation',
     skipOnCreate: ['donationID', 'receiptNumber', 'createdAt', 'updatedAt'],
+    aliases: { panNumber: 'PANNumber' },
   },
   expenses: {
     idField: 'expenseID',

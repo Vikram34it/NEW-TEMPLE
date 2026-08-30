@@ -14,14 +14,14 @@ Roles: `admin`, `accountant`, `manager`, `viewer`. Status: `active` / `inactive`
 > authentication differently (see SECURITY in Code.gs).
 
 ## 2. People
-PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Status | Notes | Birthday | Anniversary | PreferredChannel
+PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Status | Notes | Birthday | Anniversary | PreferredChannel | PANNumber | AadhaarNumber
 
 `PersonType` can hold multiple values separated by `,` (e.g. `Donor,Devotee`).
 
-`Birthday` / `Anniversary` are dates (YYYY-MM-DD; year optional). `PreferredChannel` is one of `WhatsApp`, `Email`, `SMS`, `Call`, `In Person`, `None` (used by Donor Care for greeting lists).
+`Birthday` / `Anniversary` are dates (YYYY-MM-DD; year optional). `PreferredChannel` is one of `WhatsApp`, `Email`, `SMS`, `Call`, `In Person`, `None` (used by Donor Care for greeting lists). `PANNumber` / `AadhaarNumber` are stored for donors who need an 80G tax-exemption receipt.
 
 ## 3. Donations
-DonationID | Date | DonorID | DonorName | Phone | Email | Address | Amount | Category | Purpose | PaymentMethod | TransactionReference | ReceivedBy | ReceiptNumber | Notes | CreatedAt | UpdatedAt | Deleted
+DonationID | Date | DonorID | DonorName | Phone | Email | Address | Amount | Category | Purpose | PaymentMethod | TransactionReference | ReceivedBy | ReceiptNumber | Notes | PANNumber | AadhaarNumber | Need80G | CreatedAt | UpdatedAt | Deleted
 
 - `DonationID` auto-generated: `DON-2026-0001`
 - `ReceiptNumber` auto-generated: `REC-2026-0001`

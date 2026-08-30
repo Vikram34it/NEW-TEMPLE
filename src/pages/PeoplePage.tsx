@@ -21,6 +21,8 @@ const PERSON_IMPORT_COLUMNS: ImportColumn[] = [
   { header: 'Birthday', key: 'birthday', type: 'date' },
   { header: 'Anniversary', key: 'anniversary', type: 'date' },
   { header: 'Preferred Channel', key: 'preferredChannel', options: [...PERSON_CHANNELS] },
+  { header: 'PAN Number', key: 'panNumber' },
+  { header: 'Aadhaar Number', key: 'aadhaarNumber' },
   { header: 'Notes', key: 'notes' },
 ]
 
@@ -49,6 +51,8 @@ export function PeoplePage() {
         birthday: (r.birthday as string) || undefined,
         anniversary: (r.anniversary as string) || undefined,
         preferredChannel: (r.preferredChannel as string) || undefined,
+        panNumber: (r.panNumber as string) || undefined,
+        aadhaarNumber: (r.aadhaarNumber as string) || undefined,
         notes: (r.notes as string) || '',
       }
     })
@@ -76,6 +80,8 @@ export function PeoplePage() {
     { header: 'Birthday', accessor: (p: Person) => p.birthday || '' },
     { header: 'Anniversary', accessor: (p: Person) => p.anniversary || '' },
     { header: 'Preferred Channel', accessor: (p: Person) => p.preferredChannel || '' },
+    { header: 'PAN', accessor: (p: Person) => p.panNumber || '' },
+    { header: 'Aadhaar', accessor: (p: Person) => p.aadhaarNumber || '' },
   ]
 
   const columns: Column<Person>[] = [
@@ -277,6 +283,15 @@ function PersonForm({ initial, onDone }: { initial?: Partial<Person>; onDone: ()
         </Select>
       </Field>
 
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="PAN Number" hint="Needed if the donor wants a tax (80G) receipt">
+          <Input value={form.panNumber} onChange={(e) => set('panNumber', e.target.value as never)} placeholder="ABCDE1234F" />
+        </Field>
+        <Field label="Aadhaar Number">
+          <Input value={form.aadhaarNumber} onChange={(e) => set('aadhaarNumber', e.target.value as never)} placeholder="12-digit number" maxLength={12} />
+        </Field>
+      </div>
+
       <Field label="Notes">
         <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value as never)} placeholder="Notes" />
       </Field>
@@ -328,6 +343,8 @@ function PersonProfile({ p, donations, expenses, communications, onClose }: {
         <Info icon={<CalendarHeart size={14} />} label="Birthday" value={p.birthday ? formatDate(p.birthday) : '—'} />
         <Info icon={<Gift size={14} />} label="Anniversary" value={p.anniversary ? formatDate(p.anniversary) : '—'} />
         <Info icon={<MessageCircle size={14} />} label="Preferred Channel" value={p.preferredChannel || '—'} />
+        <Info label="PAN" value={p.panNumber || '—'} />
+        <Info label="Aadhaar" value={p.aadhaarNumber || '—'} />
       </div>
       {p.address && <Info label="Address" value={p.address} />}
 
