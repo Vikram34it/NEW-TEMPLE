@@ -70,21 +70,30 @@ export async function buildXlsxTemplate({ title, columns, rowCount = MAX_ROWS }:
     ws.getColumn(i + 1).numFmt = '@'
   })
 
-  // Apply real dropdowns (Excel data validation lists) to the full data range.
+  // Dropdowns: option lists live on a dedicated hidden "Lists" sheet and are
+  // referenced by range, so the dropdown is NOT limited to Excel's inline 255-char
+  // list and every donor/category/payment method appears.
+  const listsWs = wb.addWorksheet('Lists')
+  listsWs.state = 'veryHidden'
   const validationsWs = ws as WorksheetWithValidations
   columns.forEach((col, i) => {
     if (!col.options || col.options.length === 0) return
-    const colLetter = ws.getColumn(i + 1).letter
-    const range = `${colLetter}2:${colLetter}${rowCount}`
-    const unique = [...new Set(col.options)]
-    validationsWs.dataValidations.add(range, {
+    const unique = [...new Set(col.options)].filter((v) => String(v ?? '').trim() !== '')
+    const startCell = 1
+    unique.forEach((v, j) => {
+      listsWs.getCell(startCell + j, i + 1).value = String(v)
+    })
+    const colLetter = colsLetter(i + 1)
+    const listRef = `'Lists'!$${colLetter}$1:$${colLetter}${unique.length}`
+    const dataRange = `${colLetter}2:${colLetter}${rowCount}`
+    validationsWs.dataValidations.add(dataRange, {
       type: 'list',
-      formulae: ['"' + unique.join(',').slice(0, 240) + '"'],
+      formulae: [`=${listRef}`],
       allowBlank: true,
       showErrorMessage: true,
       errorStyle: 'stop',
       errorTitle: 'Invalid value',
-      error: 'Please choose a value from the list.',
+      error: 'Please choose a value from the drop-down list.',
     })
   })
 
@@ -95,6 +104,18 @@ export async function buildXlsxTemplate({ title, columns, rowCount = MAX_ROWS }:
 
   const buf = await wb.xlsx.writeBuffer()
   return buf as ArrayBuffer
+}
+
+// Return the column letters (1 -> A, 26 -> Z, 27 -> AA, ...) for a 1-based index.
+function colsLetter(index: number): string {
+  let n = index
+  let out = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    out = String.fromCharCode(65 + rem) + out
+    n = Math.floor((n - 1) / 26)
+  }
+  return out
 }
 
 export async function downloadXlsxTemplate(options: TemplateOptions): Promise<void> {

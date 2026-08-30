@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { Button, Field, Input, Select, Textarea } from '../ui'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../../utils/constants'
@@ -46,17 +46,71 @@ const empty: DonationLike = {
   need80G: false,
 }
 
+interface DonorOption {
+  name: string
+  phone: string
+  email: string
+  address: string
+  panNumber?: string
+  aadhaarNumber?: string
+}
+
 export function DonationForm({ initial, onDone }: Props) {
-  const { addDonation, updateDonation, user, people } = useApp()
+  const { addDonation, updateDonation, user, people, donations } = useApp()
   const [form, setForm] = useState<DonationLike>({ ...empty, ...initial })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [customCategory, setCustomCategory] = useState(false)
 
-  const knownDonors = people.filter((p) => p.personType.includes('Donor'))
+  // Build the donor pick-list from BOTH saved people tagged as Donor AND any
+  // donor name seen on past donations, so every past donor can be picked.
+  const donorOptions = useMemo<DonorOption[]>(() => {
+    const map = new Map<string, DonorOption>()
+    const personDonors = people.filter((p) => p.personType.includes('Donor'))
+    for (const p of personDonors) {
+      map.set(p.name.toLowerCase(), {
+        name: p.name,
+        phone: p.phone,
+        email: p.email,
+        address: p.address,
+        panNumber: p.panNumber,
+        aadhaarNumber: p.aadhaarNumber,
+      })
+    }
+    // Past donations (most recent first) fill in any gaps in the person data.
+    const sorted = [...donations].sort((a, b) => b.date.localeCompare(a.date))
+    for (const d of sorted) {
+      const n = String(d.donorName || '').trim()
+      if (!n) continue
+      const key = n.toLowerCase()
+      const existing = map.get(key)
+      map.set(key, {
+        name: n,
+        phone: (existing?.phone || d.phone || '') as string,
+        email: (existing?.email || d.email || '') as string,
+        address: (existing?.address || d.address || '') as string,
+        panNumber: existing?.panNumber || d.panNumber || '',
+        aadhaarNumber: existing?.aadhaarNumber || d.aadhaarNumber || '',
+      })
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [people, donations])
 
   const set = <K extends keyof DonationLike>(key: K, value: DonationLike[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
+
+  const handlePickDonor = (name: string) => {
+    const donor = donorOptions.find((d) => d.name.toLowerCase() === name.toLowerCase()) || donorOptions.find((d) => d.name === name)
+    set('donorName', name)
+    if (donor) {
+      // Fill the saved personal details but keep date/amount/transaction fresh.
+      set('phone', donor.phone || '')
+      set('email', donor.email || '')
+      set('address', donor.address || '')
+      set('panNumber', donor.panNumber || '')
+      set('aadhaarNumber', donor.aadhaarNumber || '')
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -88,31 +142,18 @@ export function DonationForm({ initial, onDone }: Props) {
         <Field label="Date" required>
           <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} required />
         </Field>
-        <Field label="Choose a Saved Donor (optional)">
+        <Field label="Choose a Donor (optional)">
           <select
             className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none"
             value={form.donorName}
-            onChange={(e) => {
-              const name = e.target.value
-              set('donorName', name)
-              const donor = knownDonors.find((d) => d.name === name)
-              if (donor) {
-                set('phone', donor.phone)
-                set('email', donor.email)
-                set('address', donor.address)
-                set('panNumber', donor.panNumber || '')
-                set('aadhaarNumber', donor.aadhaarNumber || '')
-              } else {
-                if (name === '') set('phone', '')
-              }
-            }}
+            onChange={(e) => handlePickDonor(e.target.value)}
           >
-            <option value="">— Pick a saved donor (or type below) —</option>
-            {knownDonors.map((d) => (
-              <option key={d.personID} value={d.name}>{d.name}</option>
+            <option value="">— Pick a past donor (or type below) —</option>
+            {donorOptions.map((d) => (
+              <option key={d.name} value={d.name}>{d.name}</option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-400 mt-1">Tip: choosing a saved donor auto-fills their contact details and links the donation to their Donor Care profile.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Tip: picking a donor fills in their saved contact details, PAN and Aadhaar — leave the date, amount and transaction reference fresh each time.</p>
         </Field>
       </div>
 
