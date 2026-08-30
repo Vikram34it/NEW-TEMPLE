@@ -50,6 +50,25 @@ async function apiFetch(path: string, params: Record<string, string> = {}, body?
   return json.data
 }
 
+// The Apps Script backend returns rows keyed by its spreadsheet headers
+// (e.g. "UserID", "DonorName", "CreatedAt"). The React app uses the same
+// field names in camelCase (e.g. "userID", "donorName"). Convert every
+// record read from the API so the app can consume it as-is.
+function toCamel<T>(obj: Record<string, unknown>): T {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.charAt(0).toLowerCase() + k.slice(1)
+    let val = v
+    if (key === 'deleted' && typeof val === 'string') {
+      val = /^true$/i.test(val)
+    } else if (key === 'personType' && typeof val === 'string') {
+      val = val.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+    }
+    out[key] = val
+  }
+  return out as T
+}
+
 // Optional token sent to the backend (e.g. the API_KEY from Apps Script).
 // Configure it via an environment variable at build time where appropriate.
 const TOKEN = import.meta.env.VITE_API_TOKEN || ''
@@ -68,7 +87,8 @@ export const mockStore = new MockStore()
 export const api = {
   async load(record: RecordName): Promise<unknown> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      return apiFetch(record)
+      const data = (await apiFetch(record)) as unknown[]
+      return Array.isArray(data) ? data.map((r) => toCamel(r as Record<string, unknown>)) : data
     }
     return mockStore.data[record]
   },
@@ -153,6 +173,18 @@ export const dataService = {
     }
     const { donations, expenses, accounts, pendingPayments, projects } = mockStore.data
     return buildDashboardData(donations, expenses, accounts, pendingPayments, projects)
+  },
+
+  async getReports(): Promise<unknown> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      const res = (await apiFetch('getReports')) as { donations: unknown[]; expenses: unknown[] }
+      return {
+        ...res,
+        donations: res.donations.map((r) => toCamel(r as Record<string, unknown>)),
+        expenses: res.expenses.map((r) => toCamel(r as Record<string, unknown>)),
+      }
+    }
+    return null
   },
 
   async getUsers(): Promise<User[]> {
