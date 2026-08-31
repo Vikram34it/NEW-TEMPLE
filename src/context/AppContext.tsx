@@ -467,8 +467,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       const next = donations.map((x) => (x.donationID === id ? { ...x, deleted: true } : x))
       setDonations(next)
+      await dataService.persist('donations', 'softDelete', { donationID: id })
       postToMockLedger(next, expenses)
       audit('SoftDelete', 'Donations', id)
+      setDashboard(await dataService.getDashboard())
     }
   }
 
@@ -556,8 +558,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       const next = expenses.map((x) => (x.expenseID === id ? { ...x, deleted: true } : x))
       setExpenses(next)
+      await dataService.persist('expenses', 'softDelete', { expenseID: id })
       postToMockLedger(donations, next)
       audit('SoftDelete', 'Expenses', id)
+      setDashboard(await dataService.getDashboard())
     }
   }
 

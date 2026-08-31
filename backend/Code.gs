@@ -927,7 +927,14 @@ function tableData_(sheetName, headers) {
 }
 
 function readAll_(sheetName, headers) {
-  return tableData_(sheetName, headers);
+  var rows = tableData_(sheetName, headers);
+  // Soft-deleted rows (Deleted = 'TRUE') are excluded so that no caller can
+  // accidentally aggregate a cancelled donation/expense. Sheets without a
+  // Deleted column are returned unchanged.
+  if (headers && headers.indexOf('Deleted') >= 0) {
+    return rows.filter(notDeleted_);
+  }
+  return rows;
 }
 
 function nextIdFor_(sheetName, idColumnName, prefix) {

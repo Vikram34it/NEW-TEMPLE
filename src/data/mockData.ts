@@ -194,6 +194,8 @@ export function buildDashboardData(
   pendingPayments: PendingPayment[],
   projects: Project[]
 ): DashboardData {
+  donations = donations.filter((d) => !d.deleted)
+  expenses = expenses.filter((e) => !e.deleted)
   const totalDonations = donations.reduce((s, d) => s + d.amount, 0)
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0)
 
