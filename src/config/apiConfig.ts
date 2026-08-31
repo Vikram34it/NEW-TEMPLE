@@ -18,5 +18,7 @@ export interface ApiConfig {
 
 export const CONFIG: ApiConfig = {
   webAppUrl: import.meta.env.VITE_WEB_APP_URL || '',
-  useMockData: (import.meta.env.VITE_USE_MOCK ?? 'true') !== 'false',
+  useMockData: import.meta.env.VITE_WEB_APP_URL
+    ? import.meta.env.VITE_USE_MOCK === 'true'
+    : true,
 }
