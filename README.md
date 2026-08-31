@@ -159,6 +159,7 @@ temple money data:
 - **Donations** — full fields, search/filter/export, receipts, donor history
 - **Expenses** — construction & operations categories, project/vendor tracking
 - **People** — multi-role profiles with total donations & payment history
+- **Bulk Messaging** — personalised bulk emails (via the temple's Gmail), bulk SMS (MSG91 / TextLocal / Twilio / custom gateway), and a free WhatsApp fallback, with smart templates that auto-fill {Name}, {Amount} per person. Campaigns can also be **scheduled for a future date/time** — a one-per-minute Apps Script trigger sends them automatically, and a campaign list tracks each run (sent / partial / failed / cancelled)
 - **Vendors & Contractors** — paid/pending totals, expense history, projects
 - **Projects** — construction budget vs actual tracking
 - **Pending Payments** — pending / partially paid / paid / overdue

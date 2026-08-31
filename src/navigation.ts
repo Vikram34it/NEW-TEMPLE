@@ -33,6 +33,7 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Donor Care',
     items: [
       { path: '/donor-care', label: 'Donor Care', roles: ['admin', 'accountant', 'manager'] },
+      { path: '/bulk-messaging', label: 'Bulk Messaging', roles: ['admin', 'accountant', 'manager'] },
     ],
   },
   {

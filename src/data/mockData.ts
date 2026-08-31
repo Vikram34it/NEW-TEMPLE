@@ -2,6 +2,7 @@ import type {
   Account,
   Announcement,
   AuditLogEntry,
+  Campaign,
   Communication,
   DashboardData,
   Donation,
@@ -107,6 +108,12 @@ const baseSettings: Settings = {
   currentSequence: 11,
   defaultBankAccount: 'Main Bank Account',
   currency: 'INR',
+  smsProvider: 'off',
+  smsApiKey: '',
+  smsAccountSid: '',
+  smsSenderId: '',
+  smsFrom: '',
+  smsCustomUrl: '',
 }
 
 const baseUsers: User[] = [
@@ -172,6 +179,7 @@ export const mockData = {
   eventVolunteers: baseEventVolunteers,
   requests: baseRequests,
   communications: baseCommunications,
+  campaigns: [] as Campaign[],
 }
 
 export function buildDashboardData(

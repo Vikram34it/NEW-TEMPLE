@@ -70,6 +70,7 @@ var CONFIG = {
     eventVolunteers: 'EventVolunteers',
     requests: 'Requests',
     communication: 'Communication',
+    campaigns: 'Campaigns',
   },
 };
 
@@ -242,6 +243,7 @@ var HEADERS = {
   eventVolunteers: ['VolunteerID', 'EventID', 'PersonID', 'Name', 'Role', 'RegisteredAt'],
   requests: ['RequestID', 'Date', 'PersonID', 'PersonName', 'Type', 'Description', 'AssignedTo', 'Status', 'Notes'],
   communication: ['CommunicationID', 'PersonID', 'DonorName', 'Date', 'Channel', 'Type', 'Subject', 'Message', 'SentBy', 'Status'],
+  campaigns: ['CampaignID', 'ScheduledAt', 'Channel', 'Type', 'Subject', 'Message', 'Festival', 'Recipients', 'SentBy', 'Status', 'CreatedAt'],
 };
 
 /* ==========================================================================
@@ -415,6 +417,14 @@ function route_(action, params, body, method) {
     case 'updateCommunication': return updateRecord_(CONFIG.sheetNames.communication, HEADERS.communication, body.record, 'CommunicationID');
     case 'deleteCommunication': return hardDeleteRecord_(CONFIG.sheetNames.communication, 'CommunicationID', body.id);
     case 'sendDonorEmail': return sendDonorEmail_(body);
+    case 'sendBulkEmails': return sendBulkEmails_(body);
+    case 'sendBulkSms': return sendBulkSms_(body);
+    case 'logBulkCommunications': return logBulkCommunications_(body);
+    case 'getCampaigns': return readAll_(CONFIG.sheetNames.campaigns, HEADERS.campaigns);
+    case 'campaigns': return readAll_(CONFIG.sheetNames.campaigns, HEADERS.campaigns);
+    case 'scheduleBulkCampaign': return scheduleBulkCampaign_(body);
+    case 'cancelBulkCampaign': return cancelBulkCampaign_(body);
+    case 'processPendingCampaigns': return processPendingCampaigns();
 
     default:
       throw new Error('Unknown action: ' + action);
@@ -439,6 +449,363 @@ function sendDonorEmail_(input) {
   }
   GmailApp.sendEmail(String(to), String(subject), String(bodyText));
   return { sent: true, to: String(to), sentAt: new Date().toISOString() };
+}
+
+/* ==========================================================================
+ * BULK MESSAGING
+ *
+ * - sendBulkEmails_: one personalized email per recipient via the temple's own
+ *   Gmail (GmailApp). Note Gmail quotas: ~100 recipients/day for free Gmail,
+ *   ~1500/day for Google Workspace. Failures are collected per recipient so a
+ *   single problem never blocks the whole campaign.
+ * - sendBulkSms_: sends via a configured SMS gateway (Settings > Messaging).
+ *   Supported: MSG91, TextLocal, Twilio, or a custom URL template.
+ * - logBulkCommunications_: writes many rows to the Communication log in a
+ *   single request (used to record bulk campaigns per recipient).
+ * ========================================================================== */
+
+function sendBulkEmails_(input) {
+  var messages = (input && input.messages) || [];
+  if (!Array.isArray(messages) || messages.length === 0) throw new Error('No messages to send');
+  var sent = 0;
+  var failures = [];
+  for (var i = 0; i < messages.length; i++) {
+    var m = messages[i] || {};
+    var to = String(m.to || m.email || '').trim();
+    var subject = String(m.subject || '').trim();
+    var bodyText = String(m.body || m.message || '').trim();
+    if (!to || !subject || !bodyText) {
+      failures.push({ to: to || '?', error: 'Missing recipient email, subject or body' });
+      continue;
+    }
+    try {
+      GmailApp.sendEmail(to, subject, bodyText);
+      sent++;
+    } catch (err) {
+      failures.push({ to: to, error: String(err) });
+    }
+  }
+  audit_('bulk-email', 'Send', 'BULK-EMAIL', '', sent + ' sent, ' + failures.length + ' failed');
+  return { sent: sent, failed: failures.length, total: messages.length, failures: failures };
+}
+
+function sendBulkSms_(input) {
+  var messages = (input && input.messages) || [];
+  if (!Array.isArray(messages) || messages.length === 0) throw new Error('No messages to send');
+  var settings = getSettings_();
+  var provider = String(settings.smsProvider || 'off').toLowerCase();
+  if (provider === 'off' || provider === '' || provider === 'none') {
+    throw new Error('SMS gateway is not configured. Go to Settings > Messaging to choose a provider, or send via WhatsApp instead.');
+  }
+  var sent = 0;
+  var failures = [];
+  for (var i = 0; i < messages.length; i++) {
+    var item = messages[i] || {};
+    var to = normalizePhone_(item.to);
+    var bodyText = String(item.body || item.message || '').trim();
+    if (!to || !bodyText) {
+      failures.push({ to: String(item.to || '?'), error: 'Missing phone number or message' });
+      continue;
+    }
+    try {
+      sendOneSms_(provider, settings, to, bodyText);
+      sent++;
+    } catch (err) {
+      failures.push({ to: String(item.to || to), error: String(err) });
+    }
+  }
+  audit_('bulk-sms', 'Send', 'BULK-SMS', '', sent + ' sent, ' + failures.length + ' failed');
+  return { sent: sent, failed: failures.length, total: messages.length, failures: failures };
+}
+
+/* Add a country code to a bare 10-digit Indian number; also accepts already
+ * international numbers (11-14 digits). */
+function normalizePhone_(phone) {
+  var digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 10) return '91' + digits;
+  if (digits.length > 10 && digits.length <= 14) return digits;
+  return digits;
+}
+
+function sendOneSms_(provider, settings, to, bodyText) {
+  var apiKey = String(settings.smsApiKey || '').trim();
+  var senderId = String(settings.smsSenderId || '').trim();
+  var from = String(settings.smsFrom || '').trim();
+  var sid = String(settings.smsAccountSid || '').trim();
+  var shell = { muteHttpExceptions: true };
+  var response;
+
+  if (provider === 'msg91') {
+    var url91 = 'https://api.msg91.com/api/sendhttp.php?authkey=' + encodeURIComponent(apiKey)
+      + '&mobiles=' + encodeURIComponent(to)
+      + '&message=' + encodeURIComponent(bodyText)
+      + '&sender=' + encodeURIComponent(senderId || 'TEMPLE')
+      + '&route=4';
+    response = UrlFetchApp.fetch(url91, shell);
+  } else if (provider === 'textlocal') {
+    shell.method = 'post';
+    shell.payload = {
+      apikey: apiKey,
+      numbers: to,
+      message: bodyText,
+      sender: senderId || 'TXTLCL',
+    };
+    response = UrlFetchApp.fetch('https://api.textlocal.in/send/', shell);
+  } else if (provider === 'twilio') {
+    if (!sid) throw new Error('Twilio Account SID is missing');
+    shell.method = 'post';
+    shell.headers = { Authorization: 'Basic ' + Utilities.base64Encode(sid + ':' + apiKey) };
+    shell.payload = { From: from, To: to, Body: bodyText };
+    response = UrlFetchApp.fetch(
+      'https://api.twilio.com/2010-04-01/Accounts/' + encodeURIComponent(sid) + '/Messages.json',
+      shell
+    );
+  } else if (provider === 'custom') {
+    var url = String(settings.smsCustomUrl || '').trim();
+    if (!url) throw new Error('Custom SMS URL is empty');
+    url = url
+      .replace(/\{phone\}/g, encodeURIComponent(to))
+      .replace(/\{message\}/g, encodeURIComponent(bodyText))
+      .replace(/\{api_key\}/g, encodeURIComponent(apiKey))
+      .replace(/\{sender\}/g, encodeURIComponent(senderId))
+      .replace(/\{from\}/g, encodeURIComponent(from));
+    response = UrlFetchApp.fetch(url, shell);
+  } else {
+    throw new Error('Unsupported SMS provider: ' + provider);
+  }
+
+  var code = response.getResponseCode();
+  var text = response.getContentText();
+  if (code < 200 || code >= 300) {
+    throw new Error('Gateway error ' + code + ': ' + String(text).slice(0, 200));
+  }
+  // Providers that return HTTP 200 but report failure in the body.
+  var low = String(text).toLowerCase();
+  if (low.indexOf('"type":"failure"') >= 0 || low.indexOf('"status":"failure"') >= 0) {
+    throw new Error('Gateway reported failure: ' + text.slice(0, 200));
+  }
+}
+
+function logBulkCommunications_(body) {
+  var records = (body && body.records) || [];
+  if (!Array.isArray(records) || records.length === 0) throw new Error('No records to log');
+  var created = 0;
+  var errors = [];
+  for (var i = 0; i < records.length; i++) {
+    try {
+      createRecord_(CONFIG.sheetNames.communication, HEADERS.communication, records[i], 'COM-', 'communication', ['DonorName']);
+      created++;
+    } catch (err) {
+      errors.push(String(err));
+    }
+  }
+  audit_('bulk-log', 'Create', 'BULK-LOG', '', created + ' logged, ' + errors.length + ' errors');
+  return { created: created, errors: errors };
+}
+
+/* ==========================================================================
+ * SCHEDULED BULK CAMPAIGNS
+ *
+ * Bulk messages can be scheduled for a future date/time. The frontend stores
+ * the campaign (recipients + message templates) in the Campaigns sheet with
+ * status "scheduled". A one-per-project minute trigger ("processPendingCampaigns")
+ * picks up due campaigns, personalises every message at send time, delivers it
+ * through Gmail / the SMS gateway, and logs each communication.
+ * ========================================================================== */
+
+function scheduleBulkCampaign_(body) {
+  var payload = body || {};
+  var recipients = payload.recipients || [];
+  var scheduledAt = String(payload.scheduledAt || '').trim();
+  var channel = String(payload.channel || '').toLowerCase();
+  var type = String(payload.type || 'Other');
+  var subject = String(payload.subject || '');
+  var message = String(payload.message || '');
+  var festival = String(payload.festival || '');
+  var sentBy = String(payload.sentBy || '');
+  if (!Array.isArray(recipients) || recipients.length === 0) throw new Error('No recipients');
+  if (!scheduledAt) throw new Error('Scheduled time is required');
+  if (!message) throw new Error('Message is required');
+  if (channel === 'email' && !subject) throw new Error('Subject is required for email');
+  if (channel !== 'email' && channel !== 'sms') throw new Error('Only email and SMS can be scheduled');
+
+  var record = {
+    ScheduledAt: scheduledAt,
+    Channel: channel,
+    Type: type,
+    Subject: subject,
+    Message: message,
+    Festival: festival,
+    Recipients: JSON.stringify(recipients),
+    SentBy: sentBy,
+    Status: 'scheduled',
+  };
+  var created = createRecord_(CONFIG.sheetNames.campaigns, HEADERS.campaigns, record, 'CAM-', 'campaign', ['ScheduledAt', 'Channel', 'Message']);
+  ensureCampaignTrigger_();
+  return created;
+}
+
+function cancelBulkCampaign_(body) {
+  var id = body && body.id;
+  if (!id) throw new Error('Missing campaign ID');
+  var headers = HEADERS.campaigns;
+  var data = tableData_(CONFIG.sheetNames.campaigns, headers);
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i].CampaignID) === String(id)) {
+      updateRecord_(CONFIG.sheetNames.campaigns, headers, { CampaignID: id, Status: 'cancelled' }, 'CampaignID');
+      return { success: true };
+    }
+  }
+  throw new Error('Campaign not found: ' + id);
+}
+
+/* Make sure a single minute trigger exists that runs processPendingCampaigns. */
+function ensureCampaignTrigger_() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'processPendingCampaigns') return;
+    }
+    ScriptApp.newTrigger('processPendingCampaigns').timeBased().everyMinutes(1).create();
+  } catch (err) {
+    console.log('Could not create campaign trigger: ' + err);
+  }
+}
+
+/* Run by the minute trigger (and callable from the web). Sends every due
+ * campaign. Must be a top-level function so it can be a trigger handler. */
+function processPendingCampaigns() {
+  var headers = HEADERS.campaigns;
+  var all = tableData_(CONFIG.sheetNames.campaigns, headers);
+  var now = new Date();
+  var due = all.filter(function (c) {
+    return String(c.Status) === 'scheduled' && new Date(c.ScheduledAt) <= now;
+  });
+  for (var i = 0; i < due.length; i++) {
+    try {
+      processCampaign_(due[i]);
+    } catch (err) {
+      console.log('Campaign ' + due[i].CampaignID + ' failed: ' + err);
+    }
+  }
+  return { processed: due.length };
+}
+
+/* Optional helper you can call from the Apps Script function dropdown to
+ * catch up on due campaigns immediately (e.g. after re-deploying). */
+function runScheduledCampaignsNow() {
+  return processPendingCampaigns();
+}
+
+function processCampaign_(campaign) {
+  var id = String(campaign.CampaignID);
+  var channel = String(campaign.Channel || '').toLowerCase();
+  var type = String(campaign.Type || 'Other');
+  var subject = String(campaign.Subject || '');
+  var festival = String(campaign.Festival || '');
+  var recipients = [];
+  try {
+    recipients = JSON.parse(campaign.Recipients || '[]') || [];
+  } catch (err) {
+    recipients = [];
+  }
+  var settings = getSettings_();
+  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var sent = 0;
+  var failures = [];
+  var logRows = [];
+
+  for (var i = 0; i < recipients.length; i++) {
+    var rp = recipients[i] || {};
+    var values = campaignValues_(rp, settings, donations, festival);
+    var to = channel === 'email'
+      ? String(rp.email || '').trim()
+      : normalizePhone_(rp.phone);
+    var subj = channel === 'email' ? fillTemplate_(subject, values) : '';
+    var body = fillTemplate_(campaign.Message, values);
+    if (!to || !body) {
+      failures.push({ to: String(rp.phone || rp.email || '?'), error: 'Missing contact' });
+      continue;
+    }
+    try {
+      if (channel === 'email') {
+        GmailApp.sendEmail(to, subj, body);
+      } else {
+        sendOneSms_(String(settings.smsProvider || 'off').toLowerCase(), settings, to, body);
+      }
+      sent++;
+      logRows.push({
+        PersonID: String(rp.personID || ''),
+        DonorName: String(rp.name || ''),
+        Date: new Date().toISOString().slice(0, 10),
+        Channel: channel === 'email' ? 'Email' : 'SMS',
+        Type: type,
+        Subject: subj,
+        Message: body,
+        SentBy: String(campaign.SentBy || ''),
+        Status: 'Sent',
+      });
+    } catch (err) {
+      failures.push({ to: to, error: String(err) });
+    }
+  }
+
+  for (var k = 0; k < logRows.length; k++) {
+    try {
+      createRecord_(CONFIG.sheetNames.communication, HEADERS.communication, logRows[k], 'COM-', 'communication', ['DonorName']);
+    } catch (err) {
+      console.log('Communication log failed for campaign ' + id + ': ' + err);
+    }
+  }
+
+  var status = failures.length === 0 ? 'sent' : (sent > 0 ? 'partial' : 'failed');
+  updateRecord_(CONFIG.sheetNames.campaigns, HEADERS.campaigns, { CampaignID: id, Status: status }, 'CampaignID');
+  audit_('campaign', 'Process', id, '', sent + ' sent, ' + failures.length + ' failed');
+}
+
+/* Personalisation values for one recipient at the moment the campaign runs so
+ * {Amount} reflects their latest recorded donation. */
+function campaignValues_(recipient, settings, donations, festival) {
+  var name = String(recipient.name || 'Devotee');
+  var personID = String(recipient.personID || '');
+  var last = null;
+  for (var i = 0; i < donations.length; i++) {
+    var d = donations[i];
+    if (String(d.Deleted) === 'TRUE') continue;
+    var matched = (personID && String(d.DonorID) === personID) ||
+      String(d.DonorName || '').toLowerCase() === name.toLowerCase();
+    if (matched && (!last || String(d.Date) > String(last.Date))) last = d;
+  }
+  return {
+    Name: name,
+    Amount: last ? '₹' + indianFormat_(Number(last.Amount) || 0) : '',
+    City: String(recipient.city || ''),
+    TempleName: String(settings.templeName || 'Temple'),
+    Festival: festival || 'the festival',
+  };
+}
+
+function fillTemplate_(text, values) {
+  return String(text).replace(/\{(\w+)\}/g, function (_, key) {
+    var v = values[key];
+    return (v === undefined || v === null) ? '' : String(v);
+  });
+}
+
+/* Indian-style grouping: 5000000 -> "50,00,000". */
+function indianFormat_(num) {
+  num = Math.floor(Math.abs(Number(num) || 0));
+  var s = String(num);
+  if (s.length <= 3) return s;
+  var last3 = s.slice(-3);
+  var rest = s.slice(0, -3);
+  var parts = [last3];
+  while (rest.length > 2) {
+    parts.unshift(rest.slice(-2));
+    rest = rest.slice(0, -2);
+  }
+  if (rest) parts.unshift(rest);
+  return parts.join(',');
 }
 
 /* ==========================================================================
@@ -760,6 +1127,12 @@ function getSettings_() {
     currentSequence: 1,
     defaultBankAccount: 'Main Bank Account',
     currency: 'INR',
+    smsProvider: 'off',
+    smsApiKey: '',
+    smsAccountSid: '',
+    smsSenderId: '',
+    smsFrom: '',
+    smsCustomUrl: '',
   };
   if (!settingsSheet) return defaults;
   var vals = settingsSheet.getDataRange().getValues();

@@ -3,6 +3,11 @@ import { buildDashboardData, mockData } from '../data/mockData'
 import type {
   Account,
   Announcement,
+  BulkCampaignPayload,
+  BulkEmailPart,
+  BulkSendResult,
+  BulkSmsPart,
+  Campaign,
   Communication,
   DashboardData,
   Donation,
@@ -402,6 +407,100 @@ export const dataService = {
       }
     }
     return { sent: true, to, sentAt: new Date().toISOString() }
+  },
+
+  // Send personalized bulk emails (one per recipient) through the temple's
+  // Gmail. Demo mode simulates a successful send.
+  async sendBulkEmails(messages: BulkEmailPart[]): Promise<BulkSendResult> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('sendBulkEmails', {}, { messages })) as BulkSendResult
+    }
+    await new Promise((r) => setTimeout(r, 600))
+    const parts = messages.filter((m) => m.to && m.subject && m.body)
+    const skipped = messages.length - parts.length
+    return {
+      sent: parts.length,
+      failed: skipped,
+      total: messages.length,
+      failures: skipped > 0 ? [{ to: '—', error: `${skipped} message(s) had no contacts` }] : [],
+    }
+  },
+
+  // Send bulk SMS through a configured gateway. In demo mode a non-'off'
+  // provider simulates success; an unconfigured gateway returns a clear error
+  // so the UI can suggest the WhatsApp fallback.
+  async sendBulkSms(messages: BulkSmsPart[]): Promise<BulkSendResult> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('sendBulkSms', {}, { messages })) as BulkSendResult
+    }
+    const { settings } = mockStore.data
+    const provider = String(settings.smsProvider || 'off').toLowerCase()
+    if (!provider || provider === 'off' || provider === 'none') {
+      throw new Error('SMS gateway is not configured. Go to Settings > Messaging to choose a provider, or send via WhatsApp instead.')
+    }
+    await new Promise((r) => setTimeout(r, 600))
+    const parts = messages.filter((m) => m.to && m.body)
+    const skipped = messages.length - parts.length
+    return {
+      sent: parts.length,
+      failed: skipped,
+      total: messages.length,
+      failures: skipped > 0 ? [{ to: '—', error: `${skipped} message(s) had no phone number` }] : [],
+    }
+  },
+
+  // Write many Communication log rows in one request (bulk campaign trail).
+  async logBulkCommunications(records: Array<Omit<Communication, 'communicationID'>>): Promise<{ created: number; errors: string[] }> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('logBulkCommunications', {}, { records })) as { created: number; errors: string[] }
+    }
+    const arr = mockStore.data.communications as Communication[]
+    const withIds = records.map((r, i) => ({
+      ...r,
+      communicationID: `COM-BULK-${String(arr.length + i + 1).padStart(3, '0')}`,
+    }))
+    ;(arr as unknown[]).push(...withIds)
+    return { created: withIds.length, errors: [] }
+  },
+
+  // Scheduled campaigns: list, schedule for later (sent server-side by a
+  // Google Apps Script time trigger), and cancel while still pending.
+  async getCampaigns(): Promise<Campaign[]> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      const data = (await apiFetch('getCampaigns')) as unknown[]
+      return data.map((r) => toCamel(r as Record<string, unknown>)) as Campaign[]
+    }
+    return mockStore.data.campaigns as Campaign[]
+  },
+
+  async scheduleBulkCampaign(payload: BulkCampaignPayload): Promise<Campaign> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return toCamel((await apiFetch('scheduleBulkCampaign', {}, payload)) as Record<string, unknown>) as Campaign
+    }
+    const c: Campaign = {
+      campaignID: `CAM-${String((mockStore.data.campaigns as Campaign[]).length + 1).padStart(3, '0')}`,
+      scheduledAt: payload.scheduledAt,
+      channel: payload.channel,
+      type: payload.type,
+      subject: payload.subject,
+      message: payload.message,
+      festival: payload.festival,
+      recipients: JSON.stringify(payload.recipients),
+      sentBy: payload.sentBy,
+      status: 'scheduled',
+      createdAt: new Date().toISOString(),
+    }
+    ;(mockStore.data.campaigns as unknown[]).push(c)
+    return c
+  },
+
+  async cancelCampaign(id: string): Promise<void> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      await apiFetch('cancelBulkCampaign', {}, { id })
+      return
+    }
+    const c = (mockStore.data.campaigns as Campaign[]).find((x) => x.campaignID === id)
+    if (c) c.status = 'cancelled'
   },
 
   // Mark a message as read (partial update against the backend / mock store).

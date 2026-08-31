@@ -19,6 +19,7 @@ import {
   CalendarDays,
   HeartHandshake,
   Heart,
+  Send,
 } from 'lucide-react'
 import { NAV_SECTIONS } from '../navigation'
 import { useApp } from '../context/AppContext'
@@ -40,6 +41,7 @@ const icons: Record<string, React.ReactNode> = {
   '/events': <CalendarDays size={18} />,
   '/requests': <HeartHandshake size={18} />,
   '/donor-care': <Heart size={18} />,
+  '/bulk-messaging': <Send size={18} />,
 }
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {

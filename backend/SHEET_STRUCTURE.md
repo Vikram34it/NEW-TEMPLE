@@ -71,6 +71,15 @@ Donor Care touchpoint log. `Channel`: WhatsApp, Email, SMS, Phone Call, In Perso
 `Type`: Thank You, Receipt, Festival Greeting, Birthday Wish, Anniversary Wish, Invitation,
 Update/News, Re-engagement, Follow-up, Other. `Status`: Sent / Done.
 
+## 13. Campaigns
+CampaignID | ScheduledAt | Channel | Type | Subject | Message | Festival | Recipients | SentBy | Status | CreatedAt
+
+Scheduled bulk-messaging runs (emails / SMS). `ScheduledAt` is an ISO timestamp;
+when it passes, a one-per-minute Apps Script trigger (`processPendingCampaigns`)
+sends each recipient a personalised message, logs every send to Communication,
+and updates `Status` (`scheduled` → `sent` / `partial` / `failed`, or `cancelled`).
+`Recipients` is a JSON array of `{personID, name, email, phone, city}`.
+
 ---
 
 ## How to set it up — FULLY AUTOMATED (no manual sheet work)

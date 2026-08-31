@@ -166,6 +166,12 @@ export interface Settings {
   currentSequence: number
   defaultBankAccount: string
   currency: string
+  smsProvider?: string
+  smsApiKey?: string
+  smsAccountSid?: string
+  smsSenderId?: string
+  smsFrom?: string
+  smsCustomUrl?: string
 }
 
 export interface DashboardData {
@@ -241,6 +247,62 @@ export interface PrayerRequest {
   assignedTo: string
   status: 'open' | 'in-progress' | 'resolved' | 'closed'
   notes: string
+}
+
+export interface BulkEmailPart {
+  to: string
+  subject: string
+  body: string
+}
+
+export interface BulkSmsPart {
+  to: string
+  body: string
+}
+
+export interface BulkSendResult {
+  sent: number
+  failed: number
+  total: number
+  failures: { to: string; error: string }[]
+}
+
+export type CommunicationChannel = 'Email' | 'SMS' | 'WhatsApp'
+
+export type CampaignChannel = 'email' | 'sms'
+export type CampaignStatus = 'scheduled' | 'sent' | 'partial' | 'failed' | 'cancelled'
+
+export interface CampaignRecipient {
+  personID?: string
+  name: string
+  email?: string
+  phone?: string
+  city?: string
+}
+
+export interface Campaign {
+  campaignID: string
+  scheduledAt: string
+  channel: CampaignChannel
+  type: string
+  subject: string
+  message: string
+  festival: string
+  recipients: string
+  sentBy: string
+  status: CampaignStatus
+  createdAt: string
+}
+
+export interface BulkCampaignPayload {
+  recipients: CampaignRecipient[]
+  subject: string
+  message: string
+  festival: string
+  channel: CampaignChannel
+  type: string
+  scheduledAt: string
+  sentBy: string
 }
 
 export type { Settings as AppSettings }

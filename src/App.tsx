@@ -1,6 +1,6 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { AppProvider } from './context/AppContext'
-import { AppLayout } from './layouts/AppLayout'
+import { AppLayout, RoleGuard } from './layouts/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DonationsPage } from './pages/DonationsPage'
@@ -18,6 +18,7 @@ import { MessagesPage } from './pages/MessagesPage'
 import { EventsPage } from './pages/EventsPage'
 import { RequestsPage } from './pages/RequestsPage'
 import { DonorCarePage } from './pages/DonorCarePage'
+import { BulkMessagingPage } from './pages/BulkMessagingPage'
 
 export default function App() {
   return (
@@ -42,6 +43,14 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/requests" element={<RequestsPage />} />
             <Route path="/donor-care" element={<DonorCarePage />} />
+            <Route
+              path="/bulk-messaging"
+              element={
+                <RoleGuard roles={['admin', 'accountant', 'manager']}>
+                  <BulkMessagingPage />
+                </RoleGuard>
+              }
+            />
             <Route path="*" element={<DashboardPage />} />
           </Route>
         </Routes>

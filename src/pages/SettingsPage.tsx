@@ -14,7 +14,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
-  const [tab, setTab] = useState<'temple' | 'users' | 'audit'>('temple')
+  const [tab, setTab] = useState<'temple' | 'users' | 'audit' | 'messaging'>('temple')
 
   const save = async () => {
     setSaving(true)
@@ -44,7 +44,7 @@ export function SettingsPage() {
       <PageHeader title="Settings" subtitle="Temple configuration and system management" />
 
       <div className="flex flex-wrap gap-2">
-        {[['temple', 'Temple Details'], ['users', 'Users'], ['audit', 'Audit Log']].map(([k, label]) => (
+        {[['temple', 'Temple Details'], ['messaging', 'Messaging & SMS'], ['users', 'Users'], ['audit', 'Audit Log']].map(([k, label]) => (
           <Button key={k} variant={tab === k ? 'primary' : 'secondary'} onClick={() => setTab(k as never)}>{label}</Button>
         ))}
       </div>
@@ -66,6 +66,79 @@ export function SettingsPage() {
             <Field label="Default Bank Account">
               <Input value={form.defaultBankAccount} onChange={(e) => setForm({ ...form, defaultBankAccount: e.target.value })} />
             </Field>
+            <div className="flex items-center gap-3 pt-2">
+              <Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}</Button>
+              {saveMsg && <span className={`text-sm ${saveMsg === 'Save failed' ? 'text-red-600' : 'text-emerald-600'}`}>{saveMsg}</span>}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'messaging' && (
+        <Card>
+          <CardHeader title="SMS Gateway" subtitle="Used by Bulk Messaging for sending real SMS. Emails always go through the temple's Gmail." />
+          <div className="p-5 space-y-4">
+            <Field label="SMS Provider" hint="Choose Off to use the free WhatsApp fallback in Bulk Messaging instead.">
+              <Select value={form.smsProvider} onChange={(e) => setForm({ ...form, smsProvider: e.target.value as string })}>
+                <option value="off">Off — no SMS gateway (use WhatsApp)</option>
+                <option value="msg91">MSG91 (India)</option>
+                <option value="textlocal">TextLocal</option>
+                <option value="twilio">Twilio</option>
+                <option value="custom">Custom URL template</option>
+              </Select>
+            </Field>
+
+            {form.smsProvider && form.smsProvider !== 'off' && (
+              <>
+                {form.smsProvider === 'twilio' && (
+                  <Field label="Twilio Account SID" required hint="Starts with AC… from your Twilio console.">
+                    <Input value={form.smsAccountSid} onChange={(e) => setForm({ ...form, smsAccountSid: e.target.value })} />
+                  </Field>
+                )}
+                {form.smsProvider === 'msg91' && (
+                  <Field label="MSG91 Auth Key" required>
+                    <Input value={form.smsApiKey} onChange={(e) => setForm({ ...form, smsApiKey: e.target.value })} placeholder="Your MSG91 authkey" />
+                  </Field>
+                )}
+                {form.smsProvider === 'textlocal' && (
+                  <Field label="TextLocal API Key" required>
+                    <Input value={form.smsApiKey} onChange={(e) => setForm({ ...form, smsApiKey: e.target.value })} />
+                  </Field>
+                )}
+                {form.smsProvider === 'custom' && (
+                  <>
+                    <Field label="Gateway URL Template" required hint="Use {phone}, {message}, {api_key}, {sender} and {from} as placeholders. Fetched server-side.">
+                      <Input value={form.smsCustomUrl} onChange={(e) => setForm({ ...form, smsCustomUrl: e.target.value })} placeholder="https://gateway.example.com/send?to={phone}&msg={message}&key={api_key}" />
+                    </Field>
+                    <Field label="API Key (optional)">
+                      <Input value={form.smsApiKey} onChange={(e) => setForm({ ...form, smsApiKey: e.target.value })} />
+                    </Field>
+                  </>
+                )}
+                {form.smsProvider === 'twilio' && (
+                  <Field label="Twilio Auth Token" required>
+                    <Input value={form.smsApiKey} onChange={(e) => setForm({ ...form, smsApiKey: e.target.value })} />
+                  </Field>
+                )}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {(form.smsProvider === 'msg91' || form.smsProvider === 'textlocal') && (
+                    <Field label="Sender ID" hint="6 characters (MSG91) / 3-11 (TextLocal)">
+                      <Input value={form.smsSenderId} onChange={(e) => setForm({ ...form, smsSenderId: e.target.value })} />
+                    </Field>
+                  )}
+                  {form.smsProvider === 'twilio' && (
+                    <Field label="From Number" hint="Your Twilio number, e.g. +1234567890">
+                      <Input value={form.smsFrom} onChange={(e) => setForm({ ...form, smsFrom: e.target.value })} />
+                    </Field>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400">
+                  Phone numbers are normalised automatically (10-digit Indian numbers get a +91 prefix). Every number is
+                  built server-side, so your keys stay out of the browser.
+                </p>
+              </>
+            )}
+
             <div className="flex items-center gap-3 pt-2">
               <Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}</Button>
               {saveMsg && <span className={`text-sm ${saveMsg === 'Save failed' ? 'text-red-600' : 'text-emerald-600'}`}>{saveMsg}</span>}

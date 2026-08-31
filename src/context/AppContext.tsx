@@ -8,6 +8,9 @@ import type {
   Account,
   Announcement,
   AuditLogEntry,
+  BulkEmailPart,
+  BulkSendResult,
+  BulkSmsPart,
   Communication,
   DashboardData,
   Donation,
@@ -140,6 +143,9 @@ interface AppContextValue {
   updateCommunication: (c: Communication) => Promise<void>
   deleteCommunication: (id: string) => Promise<void>
   sendDonorEmail: (to: string, subject: string, body: string) => Promise<{ sent: boolean; to: string; sentAt: string }>
+  sendBulkEmails: (messages: BulkEmailPart[]) => Promise<BulkSendResult>
+  sendBulkSms: (messages: BulkSmsPart[]) => Promise<BulkSendResult>
+  logBulkCommunications: (records: Array<Omit<Communication, 'communicationID'>>) => Promise<{ created: number; errors: string[] }>
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -171,6 +177,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentSequence: 1,
     defaultBankAccount: '',
     currency: 'INR',
+    smsProvider: 'off',
+    smsApiKey: '',
+    smsAccountSid: '',
+    smsSenderId: '',
+    smsFrom: '',
+    smsCustomUrl: '',
   })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
@@ -1280,6 +1292,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return dataService.sendDonorEmail(to, subject, body)
   }
 
+  async function sendBulkEmails(messages: BulkEmailPart[]): Promise<BulkSendResult> {
+    return dataService.sendBulkEmails(messages)
+  }
+
+  async function sendBulkSms(messages: BulkSmsPart[]): Promise<BulkSendResult> {
+    return dataService.sendBulkSms(messages)
+  }
+
+  async function logBulkCommunications(records: Array<Omit<Communication, 'communicationID'>>): Promise<{ created: number; errors: string[] }> {
+    return dataService.logBulkCommunications(records)
+  }
+
   const value: AppContextValue = {
     user,
     login,
@@ -1354,6 +1378,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateCommunication,
     deleteCommunication,
     sendDonorEmail,
+    sendBulkEmails,
+    sendBulkSms,
+    logBulkCommunications,
   }
 
   return (
