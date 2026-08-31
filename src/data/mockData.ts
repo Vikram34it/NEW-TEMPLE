@@ -207,8 +207,17 @@ export function buildDashboardData(
     .filter((e) => constructionCategories.includes(e.category))
     .reduce((s, e) => s + e.amount, 0)
 
+  // Derive balances from actual data, never trust stored currentBalance.
+  // bank = opening + all non-cash income − all non-cash expense
+  // cash = opening + all cash income − all cash expense
   const cashAccount = accounts.find((a) => a.type === 'cash')
   const bankAccount = accounts.find((a) => a.type === 'bank')
+  const cashIncome = donations.filter((d) => d.paymentMethod === 'Cash').reduce((s, d) => s + d.amount, 0)
+  const cashExpense = expenses.filter((e) => e.paymentMethod === 'Cash').reduce((s, e) => s + e.amount, 0)
+  const bankIncome = donations.filter((d) => d.paymentMethod !== 'Cash').reduce((s, d) => s + d.amount, 0)
+  const bankExpense = expenses.filter((e) => e.paymentMethod !== 'Cash').reduce((s, e) => s + e.amount, 0)
+  const cashBalance = (cashAccount?.openingBalance || 0) + cashIncome - cashExpense
+  const bankBalance = (bankAccount?.openingBalance || 0) + bankIncome - bankExpense
 
   const pendingTotal = pendingPayments
     .filter((p) => p.status !== 'paid')
@@ -262,8 +271,8 @@ export function buildDashboardData(
     totalDonations,
     totalExpenses,
     totalConstructionExpenses,
-    cashBalance: cashAccount ? cashAccount.currentBalance : 0,
-    bankBalance: bankAccount ? bankAccount.currentBalance : 0,
+    cashBalance,
+    bankBalance,
     pendingPayments: pendingTotal,
     thisMonthDonations,
     thisMonthExpenses,

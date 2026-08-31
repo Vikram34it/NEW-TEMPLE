@@ -1,5 +1,6 @@
 import { CONFIG } from '../config/apiConfig'
 import { buildDashboardData, mockData } from '../data/mockData'
+import { accountNameForPaymentMethod } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -227,6 +228,66 @@ class MockStore {
 
 export const mockStore = new MockStore()
 
+let mockTxnSeq = 200
+
+// Rebuild transactions + account balances from the store's actual donations/expenses.
+// Single source of truth: transactions are derived from non-deleted money records,
+// account balances are derived from opening + income − expense.
+export function reconcileMockLedger() {
+  const store = mockStore.data
+  const donations = (store.donations as Donation[]).filter((d) => !d.deleted)
+  const expenses = (store.expenses as Expense[]).filter((e) => !e.deleted)
+  const accounts = store.accounts as Account[]
+
+  // Keep only manual transactions (no DON-/EXP- reference).
+  const manual = (store.transactions as Transaction[]).filter(
+    (t) => !t.referenceID || !/^(DON|EXP)-/i.test(t.referenceID),
+  )
+
+  const auto: Transaction[] = []
+  donations.forEach((d) => {
+    mockTxnSeq++
+    auto.push({
+      transactionID: `TXN-${new Date().getFullYear()}-${String(mockTxnSeq).padStart(4, '0')}`,
+      date: d.date,
+      type: 'income',
+      incomeOrExpense: 'income',
+      amount: d.amount,
+      account: accountNameForPaymentMethod(d.paymentMethod, accounts),
+      referenceID: d.donationID,
+      description: `Donation - ${d.donorName || ''}`,
+      createdBy: d.receivedBy || 'system',
+    })
+  })
+  expenses.forEach((e) => {
+    mockTxnSeq++
+    auto.push({
+      transactionID: `TXN-${new Date().getFullYear()}-${String(mockTxnSeq).padStart(4, '0')}`,
+      date: e.date,
+      type: 'expense',
+      incomeOrExpense: 'expense',
+      amount: e.amount,
+      account: accountNameForPaymentMethod(e.paymentMethod, accounts),
+      referenceID: e.expenseID,
+      description: `Expense - ${e.description || ''}`,
+      createdBy: e.paidBy || 'system',
+    })
+  })
+
+  store.transactions = [...auto, ...manual]
+
+  // Recompute account balances: openingBalance + income − expense.
+  store.accounts = accounts.map((ac) => {
+    const inc = store.transactions
+      .filter((t: Transaction) => t.incomeOrExpense === 'income' && t.account === ac.accountName)
+      .reduce((s, t) => s + t.amount, 0)
+    const exp = store.transactions
+      .filter((t: Transaction) => t.incomeOrExpense === 'expense' && t.account === ac.accountName)
+      .reduce((s, t) => s + t.amount, 0)
+    return { ...ac, currentBalance: ac.openingBalance + inc - exp }
+  })
+}
+
 export const api = {
   async load(record: RecordName): Promise<unknown> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
@@ -282,6 +343,7 @@ function mutateMock(record: RecordName, op: MutateOp, payload: unknown) {
 
   if (op === 'create') {
     ;(arr as unknown[]).push(payload)
+    if (isMoneyRecord(record)) reconcileMockLedger()
     return payload
   }
   const cast = arr as unknown as Record<string, unknown>[]
@@ -289,15 +351,21 @@ function mutateMock(record: RecordName, op: MutateOp, payload: unknown) {
   if (idx === -1) return null
   if (op === 'update') {
     cast[idx] = { ...cast[idx], ...rec }
+    if (isMoneyRecord(record)) reconcileMockLedger()
     return cast[idx]
   }
   if (op === 'softDelete') {
     cast[idx] = { ...cast[idx], deleted: true }
-    return cast[idx]
+    const result = cast[idx]
+    if (isMoneyRecord(record)) reconcileMockLedger()
+    return result
   }
   arr.splice(idx, 1)
   return null
 }
+
+const MONEY_RECORDS: RecordName[] = ['donations', 'expenses', 'accounts', 'transactions', 'pendingPayments']
+function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r) }
 
 // Convenience data accessor used by the React app.
 export const dataService = {

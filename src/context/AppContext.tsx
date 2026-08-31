@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
-import { accountNameForPaymentMethod } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -357,240 +356,144 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ---- Mock-mode ledger parity ----
   // The live backend posts every donation/expense to the Transactions sheet
-  // and derives account balances from it. Mirror that behaviour here so the
-  // offline demo stays consistent (donations to cash -> cash account,
-  // everything else -> bank account; balances = opening + income - expense).
-  const recomputeMockBalances = (allTxns: Transaction[]) => {
-    setAccounts((prev) =>
-      prev.map((ac) => {
-        const inc = allTxns
-          .filter((t) => t.incomeOrExpense === 'income' && t.account === ac.accountName)
-          .reduce((s, t) => s + t.amount, 0)
-        const exp = allTxns
-          .filter((t) => t.incomeOrExpense === 'expense' && t.account === ac.accountName)
-          .reduce((s, t) => s + t.amount, 0)
-        return { ...ac, currentBalance: ac.openingBalance + inc - exp }
-      })
-    )
-  }
-
-  const postToMockLedger = (ds: Donation[], es: Expense[]) => {
-    const manual = transactions.filter(
-      (t) => !t.referenceID || !/^(DON|EXP)-/i.test(t.referenceID)
-    )
-    const auto: Transaction[] = []
-    ds.filter((d) => !d.deleted).forEach((d) => {
-      auto.push({
-        transactionID: `TXN-2026-${String(nextSeq()).padStart(4, '0')}`,
-        date: d.date,
-        type: 'income',
-        incomeOrExpense: 'income',
-        amount: d.amount,
-        account: accountNameForPaymentMethod(d.paymentMethod, accounts),
-        referenceID: d.donationID,
-        description: `Donation - ${d.donorName || ''}`,
-        createdBy: d.receivedBy || user?.name || '',
-      })
-    })
-    es.filter((e) => !e.deleted).forEach((e) => {
-      auto.push({
-        transactionID: `TXN-2026-${String(nextSeq()).padStart(4, '0')}`,
-        date: e.date,
-        type: 'expense',
-        incomeOrExpense: 'expense',
-        amount: e.amount,
-        account: accountNameForPaymentMethod(e.paymentMethod, accounts),
-        referenceID: e.expenseID,
-        description: `Expense - ${e.description || ''}`,
-        createdBy: e.paidBy || user?.name || '',
-      })
-    })
-    const next = [...auto, ...manual]
-    setTransactions(next)
-    recomputeMockBalances(next)
-  }
-
   // ---- Donations ----
   async function addDonation(d: Omit<Donation, 'donationID' | 'receiptNumber'>): Promise<Donation> {
-    if (CONFIG_USE_LIVE) {
-      try {
-        const created = (await dataService.persist('donations', 'create', { ...d })) as Donation
-        notify('success', 'Donation saved')
-        await refreshAll()
-        return created
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
+    const isLive = CONFIG_USE_LIVE
+    try {
+      if (!isLive) {
+        const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
+        const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
+        Object.assign(d, { donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() } as Partial<Donation>)
       }
+      const created = (await dataService.persist('donations', 'create', { ...d })) as Donation
+      notify('success', 'Donation saved')
+      await refreshAll()
+      if (!isLive) audit('Create', 'Donations', created.donationID)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
-    const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
-    const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
-    const donation: Donation = { ...d, donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() }
-    const nextDonations = [donation, ...donations]
-    setDonations(nextDonations)
-    postToMockLedger(nextDonations, expenses)
-    audit('Create', 'Donations', run)
-    return donation
   }
   async function updateDonation(d: Donation): Promise<void> {
-    setDonations((prev) => prev.map((x) => (x.donationID === d.donationID ? { ...x, ...d } : x)))
-    if (CONFIG_USE_LIVE) {
-      try {
-        await dataService.persist('donations', 'update', d)
-        notify('success', 'Donation updated')
-        await refreshAll()
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
-      }
-    } else {
-      const next = donations.map((x) => (x.donationID === d.donationID ? { ...x, ...d } : x))
-      setDonations(next)
-      postToMockLedger(next, expenses)
-      audit('Update', 'Donations', d.donationID)
+    const isLive = CONFIG_USE_LIVE
+    try {
+      await dataService.persist('donations', 'update', d)
+      notify('success', 'Donation updated')
+      await refreshAll()
+      if (!isLive) audit('Update', 'Donations', d.donationID)
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
   }
   async function softDeleteDonation(id: string): Promise<void> {
-    setDonations((prev) => prev.map((x) => (x.donationID === id ? { ...x, deleted: true } : x)))
-    if (CONFIG_USE_LIVE) {
-      try {
-        await dataService.persist('donations', 'softDelete', { donationID: id })
-        notify('success', 'Donation marked as cancelled')
-        await refreshAll()
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
-      }
-    } else {
-      const next = donations.map((x) => (x.donationID === id ? { ...x, deleted: true } : x))
-      setDonations(next)
+    const isLive = CONFIG_USE_LIVE
+    try {
       await dataService.persist('donations', 'softDelete', { donationID: id })
-      postToMockLedger(next, expenses)
-      audit('SoftDelete', 'Donations', id)
-      setDashboard(await dataService.getDashboard())
+      notify('success', 'Donation marked as cancelled')
+      await refreshAll()
+      if (!isLive) audit('SoftDelete', 'Donations', id)
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
   }
 
   async function bulkAddDonations(items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>): Promise<Donation[]> {
-    if (CONFIG_USE_LIVE) {
-      const created: Donation[] = []
-      try {
-        for (const item of items) {
-          created.push((await dataService.persist('donations', 'create', item)) as Donation)
+    const isLive = CONFIG_USE_LIVE
+    const created: Donation[] = []
+    try {
+      for (const item of items) {
+        if (!isLive) {
+          const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
+          const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
+          Object.assign(item, { donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() } as Partial<Donation>)
         }
-        notify('success', `${created.length} donation${created.length === 1 ? '' : 's'} saved`)
-        await refreshAll()
-        return created
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
+        created.push((await dataService.persist('donations', 'create', { ...item })) as Donation)
       }
+      notify('success', `${created.length} donation${created.length === 1 ? '' : 's'} saved`)
+      await refreshAll()
+      if (!isLive) audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
-    const created = items.map((d) => {
-      const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
-      const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
-      return { ...d, donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() }
-    })
-    const nextDonations = [...created, ...donations]
-    setDonations(nextDonations)
-    postToMockLedger(nextDonations, expenses)
-    audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
-    return created
   }
 
   // ---- Expenses ----
   async function addExpense(e: Omit<Expense, 'expenseID'>): Promise<Expense> {
-    if (CONFIG_USE_LIVE) {
-      try {
-        const created = (await dataService.persist('expenses', 'create', { ...e })) as Expense
-        notify('success', 'Expense saved')
-        await refreshAll()
-        return created
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
+    const isLive = CONFIG_USE_LIVE
+    try {
+      if (!isLive) {
+        const id = `EXP-2026-${String(nextSeq()).padStart(4, '0')}`
+        Object.assign(e, { expenseID: id, createdAt: new Date().toISOString() } as Partial<Expense>)
       }
+      const created = (await dataService.persist('expenses', 'create', { ...e })) as Expense
+      notify('success', 'Expense saved')
+      await refreshAll()
+      if (!isLive) audit('Create', 'Expenses', created.expenseID)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
-    const id = `EXP-2026-${String(nextSeq()).padStart(4, '0')}`
-    const expense: Expense = { ...e, expenseID: id, createdAt: new Date().toISOString() }
-    const nextExpenses = [expense, ...expenses]
-    setExpenses(nextExpenses)
-    postToMockLedger(donations, nextExpenses)
-    audit('Create', 'Expenses', id)
-    return expense
   }
   async function updateExpense(e: Expense): Promise<void> {
-    setExpenses((prev) => prev.map((x) => (x.expenseID === e.expenseID ? { ...x, ...e } : x)))
-    if (CONFIG_USE_LIVE) {
-      try {
-        await dataService.persist('expenses', 'update', e)
-        notify('success', 'Expense updated')
-        await refreshAll()
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
-      }
-    } else {
-      const next = expenses.map((x) => (x.expenseID === e.expenseID ? { ...x, ...e } : x))
-      setExpenses(next)
-      postToMockLedger(donations, next)
-      audit('Update', 'Expenses', e.expenseID)
+    const isLive = CONFIG_USE_LIVE
+    try {
+      await dataService.persist('expenses', 'update', e)
+      notify('success', 'Expense updated')
+      await refreshAll()
+      if (!isLive) audit('Update', 'Expenses', e.expenseID)
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
   }
   async function softDeleteExpense(id: string): Promise<void> {
-    setExpenses((prev) => prev.map((x) => (x.expenseID === id ? { ...x, deleted: true } : x)))
-    if (CONFIG_USE_LIVE) {
-      try {
-        await dataService.persist('expenses', 'softDelete', { expenseID: id })
-        notify('success', 'Expense marked as cancelled')
-        await refreshAll()
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
-      }
-    } else {
-      const next = expenses.map((x) => (x.expenseID === id ? { ...x, deleted: true } : x))
-      setExpenses(next)
+    const isLive = CONFIG_USE_LIVE
+    try {
       await dataService.persist('expenses', 'softDelete', { expenseID: id })
-      postToMockLedger(donations, next)
-      audit('SoftDelete', 'Expenses', id)
-      setDashboard(await dataService.getDashboard())
+      notify('success', 'Expense marked as cancelled')
+      await refreshAll()
+      if (!isLive) audit('SoftDelete', 'Expenses', id)
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
   }
 
   async function bulkAddExpenses(items: Array<Omit<Expense, 'expenseID'>>): Promise<Expense[]> {
-    if (CONFIG_USE_LIVE) {
-      const created: Expense[] = []
-      try {
-        for (const item of items) {
-          created.push((await dataService.persist('expenses', 'create', item)) as Expense)
+    const isLive = CONFIG_USE_LIVE
+    const created: Expense[] = []
+    try {
+      for (const item of items) {
+        if (!isLive) {
+          Object.assign(item, {
+            expenseID: `EXP-2026-${String(nextSeq()).padStart(4, '0')}`,
+            createdAt: new Date().toISOString(),
+          } as Partial<Expense>)
         }
-        notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
-        await refreshAll()
-        return created
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
+        created.push((await dataService.persist('expenses', 'create', { ...item })) as Expense)
       }
+      notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
+      await refreshAll()
+      if (!isLive) audit('BulkCreate', 'Expenses', `${created.length} records`, `${created.map((c) => c.expenseID).join(', ')}`)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
-    const created = items.map((e) => ({
-      ...e,
-      expenseID: `EXP-2026-${String(nextSeq()).padStart(4, '0')}`,
-      createdAt: new Date().toISOString(),
-    }))
-    const nextExpenses = [...created, ...expenses]
-    setExpenses(nextExpenses)
-    postToMockLedger(donations, nextExpenses)
-    audit('BulkCreate', 'Expenses', `${created.length} records`, `${created.map((c) => c.expenseID).join(', ')}`)
-    return created
   }
 
   // ---- People ----
@@ -908,25 +811,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function addTransaction(t: Omit<Transaction, 'transactionID'>): Promise<Transaction> {
-    if (CONFIG_USE_LIVE) {
-      try {
-        const created = (await dataService.persist('transactions', 'create', { ...t })) as Transaction
-        notify('success', 'Transaction recorded')
-        await refreshAll()
-        return created
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
+    const isLive = CONFIG_USE_LIVE
+    try {
+      if (!isLive) {
+        const id = `TXN-2026-${String(nextSeq()).padStart(4, '0')}`
+        Object.assign(t, { transactionID: id } as Partial<Transaction>)
       }
+      const created = (await dataService.persist('transactions', 'create', { ...t })) as Transaction
+      notify('success', 'Transaction recorded')
+      await refreshAll()
+      if (!isLive) audit('Create', 'Transactions', created.transactionID)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
-    const id = `TXN-2026-${String(nextSeq()).padStart(4, '0')}`
-    const tx: Transaction = { ...t, transactionID: id }
-    const nextTransactions = [tx, ...transactions]
-    setTransactions(nextTransactions)
-    recomputeMockBalances(nextTransactions)
-    audit('Create', 'Transactions', id)
-    return tx
   }
 
   async function updateSettings(s: Settings): Promise<void> {
