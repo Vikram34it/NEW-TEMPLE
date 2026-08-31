@@ -114,6 +114,11 @@ const baseSettings: Settings = {
   smsSenderId: '',
   smsFrom: '',
   smsCustomUrl: '',
+  waApiToken: '',
+  waPhoneNumberId: '',
+  waTemplateName: '',
+  waTemplateLanguage: 'en',
+  waTemplateParamMap: 'Name,Message',
 }
 
 const baseUsers: User[] = [

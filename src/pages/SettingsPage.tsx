@@ -75,6 +75,7 @@ export function SettingsPage() {
       )}
 
       {tab === 'messaging' && (
+        <>
         <Card>
           <CardHeader title="SMS Gateway" subtitle="Used by Bulk Messaging for sending real SMS. Emails always go through the temple's Gmail." />
           <div className="p-5 space-y-4">
@@ -145,6 +146,57 @@ export function SettingsPage() {
             </div>
           </div>
         </Card>
+
+        <Card>
+          <CardHeader
+            title="WhatsApp Business API (Meta)"
+            subtitle="Proactive messages must use a Meta-approved template in your WhatsApp Business Account. Map your message tokens to the template's {{1}}, {{2}} … variables in order."
+          />
+          <div className="p-5 space-y-4">
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Create the template in Meta Business Suite (e.g. body: <span className="font-mono">Hare Krishna {`{{1}}`}!
+              {`\n`}{`{{2}}`}</span>). Then set the param map below to the matching token order —{' '}
+              <span className="font-mono">Name,Message</span> fills {`{{1}}`} with the name and {`{{2}}`} with your
+              personalised message. All values stay server-side.
+            </p>
+            <Field label="Access Token" required hint="Long-lived system-user token with waba messaging permission.">
+              <Input type="password" value={form.waApiToken || ''} onChange={(e) => setForm({ ...form, waApiToken: e.target.value })} placeholder="EAAG…" />
+            </Field>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Phone Number ID" required hint="From Meta Business Suite → WhatsApp → API setup.">
+                <Input value={form.waPhoneNumberId || ''} onChange={(e) => setForm({ ...form, waPhoneNumberId: e.target.value })} />
+              </Field>
+              <Field label="Template Name" required hint="The approved template in your WABA.">
+                <Input value={form.waTemplateName || ''} onChange={(e) => setForm({ ...form, waTemplateName: e.target.value })} placeholder="temple_greeting" />
+              </Field>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="Template Language">
+                <Select value={form.waTemplateLanguage || 'en'} onChange={(e) => setForm({ ...form, waTemplateLanguage: e.target.value })}>
+                  <option value="en">English (en)</option>
+                  <option value="hi">Hindi (hi)</option>
+                  <option value="kn">Kannada (kn)</option>
+                  <option value="mr">Marathi (mr)</option>
+                  <option value="te">Telugu (te)</option>
+                  <option value="ta">Tamil (ta)</option>
+                </Select>
+              </Field>
+              <Field label="Template Param Map" hint="Comma-separated tokens in template order.">
+                <Input value={form.waTemplateParamMap || 'Message'} onChange={(e) => setForm({ ...form, waTemplateParamMap: e.target.value })} placeholder="Name,Message" />
+              </Field>
+            </div>
+            <p className="text-xs text-slate-400">
+              10-digit Indian numbers get a +91 prefix automatically. Costs follow Meta's per-conversation pricing for
+              template messages (marketing/utility rates by country).
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}</Button>
+              {saveMsg && <span className={`text-sm ${saveMsg === 'Save failed' ? 'text-red-600' : 'text-emerald-600'}`}>{saveMsg}</span>}
+            </div>
+          </div>
+        </Card>
+        </>
       )}
 
       {tab === 'users' && (

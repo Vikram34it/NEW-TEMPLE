@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Mail, MessageCircle, Send, CheckCircle2, AlertTriangle, RefreshCw, CalendarClock } from 'lucide-react'
+import { Mail, MessageCircle, MessageSquareText, Send, CheckCircle2, AlertTriangle, RefreshCw, CalendarClock } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Card, CardHeader, PageHeader, Field, Input, Select, Textarea, Badge } from '../components/ui'
 import { formatCurrency, fillTemplate, todayStr } from '../utils/helpers'
@@ -7,7 +7,7 @@ import { DONOR_MESSAGE_TEMPLATES, PERSON_TYPES, COMMUNICATION_TYPES } from '../u
 import { dataService } from '../services/apiService'
 import type { BulkEmailPart, BulkSendResult, BulkSmsPart, Campaign, CommunicationChannel, Donation, Person, Settings } from '../types'
 
-type Channel = 'email' | 'sms' | 'whatsapp'
+type Channel = 'email' | 'sms' | 'whatsapp' | 'whatsappapi'
 
 const TYPE_MAP: Record<string, string> = {
   thankyou: 'Thank You',
@@ -60,7 +60,7 @@ function valuesFor(p: Person, donations: Donation[], settings: Settings, festiva
 }
 
 export function BulkMessagingPage() {
-  const { people, donations, settings, user, sendBulkEmails, sendBulkSms, logBulkCommunications } = useApp()
+  const { people, donations, settings, user, sendBulkEmails, sendBulkSms, sendBulkWhatsApp, logBulkCommunications } = useApp()
 
   const [channel, setChannel] = useState<Channel>('email')
   const [types, setTypes] = useState<string[]>([])
@@ -156,6 +156,20 @@ export function BulkMessagingPage() {
     [targets, body, donations, settings, festival]
   )
 
+  const waApiConfigured =
+    !!String(settings.waPhoneNumberId || '').trim() && !!String(settings.waApiToken || '').trim()
+
+  // Build the ordered body parameters for the approved Meta template from the
+  // configured param map, e.g. "Name,Message" -> [name, personalised text].
+  const paramsFor = (p: Person): string[] => {
+    const values = valuesFor(p, donations, settings, festival)
+    const map = (settings.waTemplateParamMap || 'Message')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    return map.map((k) => (k === 'Message' ? fillTemplate(body, values) : values[k] || ''))
+  }
+
   const typeChips = PERSON_TYPES.map((t) => ({
     t,
     count: activePeople.filter((p) => p.personType.includes(t)).length,
@@ -163,8 +177,9 @@ export function BulkMessagingPage() {
 
   async function runSend(
     channelName: CommunicationChannel,
-    parts: BulkEmailPart[] | BulkSmsPart[],
-    targetPeople: Person[]
+    parts: BulkEmailPart[] | BulkSmsPart[] | Array<{ to: string; params: string[] }>,
+    targetPeople: Person[],
+    bodies: string[]
   ) {
     setSending(true)
     setResult(null)
@@ -173,7 +188,9 @@ export function BulkMessagingPage() {
       const res =
         channelName === 'Email'
           ? await sendBulkEmails(parts as BulkEmailPart[])
-          : await sendBulkSms(parts as BulkSmsPart[])
+          : channelName === 'SMS'
+            ? await sendBulkSms(parts as BulkSmsPart[])
+            : await sendBulkWhatsApp(parts as Array<{ to: string; params: string[] }>)
       if (logToComm) {
         const recs = targetPeople.map((p, i) => ({
           personID: p.personID,
@@ -182,7 +199,7 @@ export function BulkMessagingPage() {
           channel: channelName,
           type: commType,
           subject: channelName === 'Email' ? (parts[i] as BulkEmailPart).subject || '' : '',
-          message: (parts[i] as BulkEmailPart | BulkSmsPart).body,
+          message: bodies[i] || (parts[i] as BulkSmsPart).body || '',
           sentBy: user?.name || '',
           status: 'Sent',
         }))
@@ -208,7 +225,16 @@ export function BulkMessagingPage() {
         const values = valuesFor(p, donations, settings, festival)
         return { to: String(p.email).trim(), subject: fillTemplate(subject, values), body: fillTemplate(body, values) }
       })
-      await runSend('Email', parts, targets)
+      await runSend('Email', parts, targets, parts.map((x) => x.body))
+      return
+    }
+
+    if (channel === 'whatsappapi') {
+      if (!waApiConfigured) return setError('Configure the WhatsApp Business API under Settings > Messaging & SMS first.')
+      if (!(settings.waTemplateName || '').trim()) return setError('A WhatsApp template name is required (Settings > Messaging & SMS).')
+      const parts = targets.map((p) => ({ to: String(p.phone).trim(), params: paramsFor(p) }))
+      const bodies = targets.map((p) => fillTemplate(body, valuesFor(p, donations, settings, festival)))
+      await runSend('WhatsApp', parts, targets, bodies)
       return
     }
 
@@ -217,7 +243,7 @@ export function BulkMessagingPage() {
         to: String(p.phone).trim(),
         body: fillTemplate(body, valuesFor(p, donations, settings, festival)),
       }))
-      await runSend('SMS', parts, targets)
+      await runSend('SMS', parts, targets, parts.map((x) => x.body))
       return
     }
 
@@ -253,15 +279,16 @@ export function BulkMessagingPage() {
   }, [])
 
   const handleSchedule = async () => {
-    if (channel === 'whatsapp') return setError('WhatsApp cannot be scheduled — choose Email or SMS')
+    if (channel === 'whatsapp') return setError('Free WhatsApp links cannot be scheduled — use WhatsApp API, Email or SMS instead')
     if (targets.length === 0) return setError('Select at least one recipient')
     if (channel === 'email' && !subject.trim()) return setError('A subject is required for email')
     if (!body.trim()) return setError('Type a message first')
     if (!scheduleAt) return setError('Choose a date & time')
     if (new Date(scheduleAt).getTime() <= Date.now()) return setError('Schedule time must be in the future')
+    const channelLabel = channel === 'email' ? 'email' : channel === 'whatsappapi' ? 'WhatsApp' : 'SMS'
     if (
       !confirm(
-        `Schedule ${channel === 'email' ? 'email' : 'SMS'} to ${targets.length} recipient${
+        `Schedule ${channelLabel} to ${targets.length} recipient${
           targets.length === 1 ? '' : 's'
         } for ${new Date(scheduleAt).toLocaleString()}?`
       )
@@ -283,7 +310,7 @@ export function BulkMessagingPage() {
         subject,
         message: body,
         festival,
-        channel: channel as 'email' | 'sms',
+        channel: channel === 'whatsappapi' ? 'whatsapp' : (channel as 'email' | 'sms'),
         type: commType,
         scheduledAt: new Date(scheduleAt).toISOString(),
         sentBy: user?.name || '',
@@ -420,7 +447,18 @@ export function BulkMessagingPage() {
                   <Icon size={14} /> {label}
                 </Button>
               ))}
+              {waApiConfigured && (
+                <Button size="sm" variant={channel === 'whatsappapi' ? 'primary' : 'secondary'} onClick={() => changeChannel('whatsappapi')}>
+                  <MessageSquareText size={14} /> WhatsApp API
+                </Button>
+              )}
             </div>
+            {!waApiConfigured && (
+              <p className="text-[11px] text-slate-400">
+                Want official WhatsApp (branded templates)? Configure it in Settings &gt; Messaging &amp; SMS → WhatsApp
+                Business API.
+              </p>
+            )}
 
             <Field label="Template">
               <Select value={templateId} onChange={(e) => applyTemplate(e.target.value)}>

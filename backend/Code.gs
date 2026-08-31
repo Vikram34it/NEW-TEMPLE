@@ -419,6 +419,7 @@ function route_(action, params, body, method) {
     case 'sendDonorEmail': return sendDonorEmail_(body);
     case 'sendBulkEmails': return sendBulkEmails_(body);
     case 'sendBulkSms': return sendBulkSms_(body);
+    case 'sendBulkWhatsApp': return sendBulkWhatsApp_(body);
     case 'logBulkCommunications': return logBulkCommunications_(body);
     case 'getCampaigns': return readAll_(CONFIG.sheetNames.campaigns, HEADERS.campaigns);
     case 'campaigns': return readAll_(CONFIG.sheetNames.campaigns, HEADERS.campaigns);
@@ -516,6 +517,83 @@ function sendBulkSms_(input) {
   }
   audit_('bulk-sms', 'Send', 'BULK-SMS', '', sent + ' sent, ' + failures.length + ' failed');
   return { sent: sent, failed: failures.length, total: messages.length, failures: failures };
+}
+
+function sendBulkWhatsApp_(input) {
+  var messages = (input && input.messages) || [];
+  if (!Array.isArray(messages) || messages.length === 0) throw new Error('No WhatsApp API messages to send');
+  var settings = getSettings_();
+  var token = String(settings.waApiToken || '').trim();
+  var phoneId = String(settings.waPhoneNumberId || '').trim();
+  var tplName = String(settings.waTemplateName || '').trim();
+  var tplLang = String(settings.waTemplateLanguage || 'en').trim();
+  if (!token || !phoneId) {
+    throw new Error('WhatsApp Business API is not configured. Open Settings > Messaging & SMS and add your access token and Phone Number ID.');
+  }
+  if (!tplName) throw new Error('WhatsApp message template name is required');
+  var sent = 0;
+  var failures = [];
+  for (var i = 0; i < messages.length; i++) {
+    var item = messages[i] || {};
+    var to = normalizePhone_(item.to);
+    var params = (Array.isArray(item.params) ? item.params : []);
+    if (!to) {
+      failures.push({ to: String(item.to || '?'), error: 'Missing phone number' });
+      continue;
+    }
+    try {
+      sendOneWhatsApp_(token, phoneId, tplName, tplLang, to, params);
+      sent++;
+    } catch (err) {
+      failures.push({ to: String(item.to || to), error: String(err) });
+    }
+  }
+  audit_('bulk-whatsapp', 'Send', 'BULK-WA', '', sent + ' sent, ' + failures.length + ' failed');
+  return { sent: sent, failed: failures.length, total: messages.length, failures: failures };
+}
+
+/* Official WhatsApp Business Platform (Meta Cloud API). Proactive messages are
+ * only allowed through Meta-approved templates; the body parameters map 1:1 to
+ * the template's {{1}}, {{2}}, ... variables in order. */
+function sendOneWhatsApp_(token, phoneId, tplName, tplLang, to, params) {
+  var payload = {
+    messaging_product: 'whatsapp',
+    to: to,
+    type: 'template',
+    template: {
+      name: tplName,
+      language: { code: tplLang },
+      components: [
+        {
+          type: 'body',
+          parameters: params.map(function (p) {
+            return { type: 'text', text: String(p) };
+          }),
+        },
+      ],
+    },
+  };
+  var response = UrlFetchApp.fetch(
+    'https://graph.facebook.com/v20.0/' + encodeURIComponent(phoneId) + '/messages',
+    {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+    }
+  );
+  var code = response.getResponseCode();
+  var text = response.getContentText();
+  if (code < 200 || code >= 300) {
+    var detail = '';
+    try {
+      detail = JSON.parse(text).error && JSON.parse(text).error.message ? JSON.parse(text).error.message : text;
+    } catch (err) {
+      detail = text;
+    }
+    throw new Error('WhatsApp API error ' + code + ': ' + String(detail).slice(0, 250));
+  }
 }
 
 /* Add a country code to a bare 10-digit Indian number; also accepts already
@@ -627,7 +705,9 @@ function scheduleBulkCampaign_(body) {
   if (!scheduledAt) throw new Error('Scheduled time is required');
   if (!message) throw new Error('Message is required');
   if (channel === 'email' && !subject) throw new Error('Subject is required for email');
-  if (channel !== 'email' && channel !== 'sms') throw new Error('Only email and SMS can be scheduled');
+  if (channel !== 'email' && channel !== 'sms' && channel !== 'whatsapp') {
+    throw new Error('Only email, SMS and WhatsApp (Business API) can be scheduled');
+  }
 
   var record = {
     ScheduledAt: scheduledAt,
@@ -730,6 +810,15 @@ function processCampaign_(campaign) {
     try {
       if (channel === 'email') {
         GmailApp.sendEmail(to, subj, body);
+      } else if (channel === 'whatsapp') {
+        var waToken = String(settings.waApiToken || '').trim();
+        var waPhoneId = String(settings.waPhoneNumberId || '').trim();
+        var waTpl = String(settings.waTemplateName || '').trim();
+        var waLang = String(settings.waTemplateLanguage || 'en').trim();
+        if (!waToken || !waPhoneId || !waTpl) {
+          throw new Error('WhatsApp Business API is not configured (Settings > Messaging & SMS)');
+        }
+        sendOneWhatsApp_(waToken, waPhoneId, waTpl, waLang, to, campaignParams_(campaign, values));
       } else {
         sendOneSms_(String(settings.smsProvider || 'off').toLowerCase(), settings, to, body);
       }
@@ -738,7 +827,7 @@ function processCampaign_(campaign) {
         PersonID: String(rp.personID || ''),
         DonorName: String(rp.name || ''),
         Date: new Date().toISOString().slice(0, 10),
-        Channel: channel === 'email' ? 'Email' : 'SMS',
+        Channel: channel === 'email' ? 'Email' : (channel === 'whatsapp' ? 'WhatsApp' : 'SMS'),
         Type: type,
         Subject: subj,
         Message: body,
@@ -789,6 +878,17 @@ function fillTemplate_(text, values) {
   return String(text).replace(/\{(\w+)\}/g, function (_, key) {
     var v = values[key];
     return (v === undefined || v === null) ? '' : String(v);
+  });
+}
+
+/* Build the ordered body-parameter list for a WhatsApp template from the
+ * configured param map (Settings > waTemplateParamMap), e.g. "Name,Message". */
+function campaignParams_(campaign, values) {
+  var mapStr = String(getSettings_().waTemplateParamMap || 'Message');
+  var keys = mapStr.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  return keys.map(function (k) {
+    if (k === 'Message') return fillTemplate_(campaign.Message, values);
+    return values[k] || '';
   });
 }
 
@@ -1133,6 +1233,11 @@ function getSettings_() {
     smsSenderId: '',
     smsFrom: '',
     smsCustomUrl: '',
+    waApiToken: '',
+    waPhoneNumberId: '',
+    waTemplateName: '',
+    waTemplateLanguage: 'en',
+    waTemplateParamMap: 'Message',
   };
   if (!settingsSheet) return defaults;
   var vals = settingsSheet.getDataRange().getValues();

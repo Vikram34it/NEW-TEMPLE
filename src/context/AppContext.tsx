@@ -145,6 +145,7 @@ interface AppContextValue {
   sendDonorEmail: (to: string, subject: string, body: string) => Promise<{ sent: boolean; to: string; sentAt: string }>
   sendBulkEmails: (messages: BulkEmailPart[]) => Promise<BulkSendResult>
   sendBulkSms: (messages: BulkSmsPart[]) => Promise<BulkSendResult>
+  sendBulkWhatsApp: (messages: Array<{ to: string; params: string[] }>) => Promise<BulkSendResult>
   logBulkCommunications: (records: Array<Omit<Communication, 'communicationID'>>) => Promise<{ created: number; errors: string[] }>
 }
 
@@ -183,6 +184,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     smsSenderId: '',
     smsFrom: '',
     smsCustomUrl: '',
+    waApiToken: '',
+    waPhoneNumberId: '',
+    waTemplateName: '',
+    waTemplateLanguage: 'en',
+    waTemplateParamMap: 'Message',
   })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
@@ -1300,6 +1306,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return dataService.sendBulkSms(messages)
   }
 
+  async function sendBulkWhatsApp(messages: Array<{ to: string; params: string[] }>): Promise<BulkSendResult> {
+    return dataService.sendBulkWhatsApp(messages)
+  }
+
   async function logBulkCommunications(records: Array<Omit<Communication, 'communicationID'>>): Promise<{ created: number; errors: string[] }> {
     return dataService.logBulkCommunications(records)
   }
@@ -1380,6 +1390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sendDonorEmail,
     sendBulkEmails,
     sendBulkSms,
+    sendBulkWhatsApp,
     logBulkCommunications,
   }
 

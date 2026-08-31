@@ -172,6 +172,11 @@ export interface Settings {
   smsSenderId?: string
   smsFrom?: string
   smsCustomUrl?: string
+  waApiToken?: string
+  waPhoneNumberId?: string
+  waTemplateName?: string
+  waTemplateLanguage?: string
+  waTemplateParamMap?: string
 }
 
 export interface DashboardData {
@@ -269,7 +274,7 @@ export interface BulkSendResult {
 
 export type CommunicationChannel = 'Email' | 'SMS' | 'WhatsApp'
 
-export type CampaignChannel = 'email' | 'sms'
+export type CampaignChannel = 'email' | 'sms' | 'whatsapp'
 export type CampaignStatus = 'scheduled' | 'sent' | 'partial' | 'failed' | 'cancelled'
 
 export interface CampaignRecipient {

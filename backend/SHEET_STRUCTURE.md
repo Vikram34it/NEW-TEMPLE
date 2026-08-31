@@ -64,6 +64,13 @@ templeName | ISKCON Temple
 receiptPrefix | REC
 currency | INR
 
+SMS / WhatsApp gateway keys also live here (set via the app's Settings page):
+`smsProvider`, `smsApiKey`, `smsAccountSid`, `smsSenderId`, `smsFrom`, `smsCustomUrl`,
+`waApiToken`, `waPhoneNumberId`, `waTemplateName`, `waTemplateLanguage`, `waTemplateParamMap`.
+The official WhatsApp integration posts approved template messages to the Meta Cloud API
+(`graph.facebook.com/v20.0/{phoneNumberId}/messages`); `waTemplateParamMap` is a
+comma-separated token order (e.g. `Name,Message`) mapping to the template's `{{1}}`, `{{2}}`…
+
 ## 12. Communication
 CommunicationID | PersonID | DonorName | Date | Channel | Type | Subject | Message | SentBy | Status
 

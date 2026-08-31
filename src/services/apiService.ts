@@ -449,6 +449,28 @@ export const dataService = {
     }
   },
 
+  // Send personalised messages through the official WhatsApp Business API. The
+  // backend posts Meta-approved template messages using the settings in
+  // Messaging & SMS (access token, Phone Number ID, template + param map).
+  async sendBulkWhatsApp(messages: Array<{ to: string; params: string[] }>): Promise<BulkSendResult> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('sendBulkWhatsApp', {}, { messages })) as BulkSendResult
+    }
+    const { settings } = mockStore.data
+    if (!settings.waApiToken || !settings.waPhoneNumberId) {
+      throw new Error('WhatsApp Business API is not configured. Open Settings > Messaging & SMS and add your access token and Phone Number ID.')
+    }
+    await new Promise((r) => setTimeout(r, 600))
+    const parts = messages.filter((m) => m.to)
+    const skipped = messages.length - parts.length
+    return {
+      sent: parts.length,
+      failed: skipped,
+      total: messages.length,
+      failures: skipped > 0 ? [{ to: '—', error: `${skipped} message(s) had no phone number` }] : [],
+    }
+  },
+
   // Write many Communication log rows in one request (bulk campaign trail).
   async logBulkCommunications(records: Array<Omit<Communication, 'communicationID'>>): Promise<{ created: number; errors: string[] }> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
