@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Save, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Save, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { formatDate } from '../utils/helpers'
+import { dataService } from '../services/apiService'
 import type { Role, User } from '../types'
 
 export function SettingsPage() {
@@ -12,6 +13,8 @@ export function SettingsPage() {
   const [form, setForm] = useState({ ...settings })
   const [saveMsg, setSaveMsg] = useState('')
   const [saving, setSaving] = useState(false)
+  const [repairMsg, setRepairMsg] = useState('')
+  const [repairing, setRepairing] = useState(false)
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [tab, setTab] = useState<'temple' | 'users' | 'audit' | 'messaging'>('temple')
@@ -69,6 +72,37 @@ export function SettingsPage() {
             <div className="flex items-center gap-3 pt-2">
               <Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save Settings'}</Button>
               {saveMsg && <span className={`text-sm ${saveMsg === 'Save failed' ? 'text-red-600' : 'text-emerald-600'}`}>{saveMsg}</span>}
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Sync &amp; Repair</p>
+              <p className="text-[11px] text-slate-400 mb-2">
+                Rebuilds the ledger and account balances from currently-active donations &amp; expenses. Use this if the
+                Dashboard still shows a cancelled donation/expense.
+              </p>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={repairing}
+                  onClick={async () => {
+                    setRepairing(true)
+                    setRepairMsg('')
+                    try {
+                      await dataService.resyncLedger()
+                      setRepairMsg('Balances rebuilt — reloading…')
+                      setTimeout(() => window.location.reload(), 1200)
+                    } catch {
+                      setRepairMsg('Repair failed')
+                    } finally {
+                      setRepairing(false)
+                    }
+                  }}
+                >
+                  <RefreshCw size={14} className={repairing ? 'animate-spin' : ''} /> {repairing ? 'Repairing…' : 'Repair balances'}
+                </Button>
+                {repairMsg && <span className="text-sm text-emerald-600">{repairMsg}</span>}
+              </div>
             </div>
           </div>
         </Card>

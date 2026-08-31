@@ -426,6 +426,7 @@ function route_(action, params, body, method) {
     case 'scheduleBulkCampaign': return scheduleBulkCampaign_(body);
     case 'cancelBulkCampaign': return cancelBulkCampaign_(body);
     case 'processPendingCampaigns': return processPendingCampaigns();
+    case 'resyncLedger': return runResyncLedger();
 
     default:
       throw new Error('Unknown action: ' + action);
@@ -1525,6 +1526,31 @@ function inRange_(dateStr, from, to) {
   if (from && prefix < from) return false;
   if (to && prefix > to) return false;
   return true;
+}
+
+/* ==========================================================================
+ * DIAGNOSTIC + REPAIR
+ *
+ * Run `fixDeletedDonations()` from the Apps Script function dropdown (or let
+ * the app call it via the web endpoint) to bring the ledger, account balances
+ * and dashboard back in sync with any soft-deleted donations/expenses. This is
+ * a no-op unless stray transactions / stale balances are found.
+ * ========================================================================== */
+
+function runResyncLedger() {
+  resyncLedger_();
+  return { success: true };
+}
+
+function fixDeletedDonations() {
+  var out = { donations: [], deletedFound: [], resynced: false };
+  var donations = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var deleted = donations.filter(function (d) { return String(d.Deleted) === 'TRUE'; });
+  out.deletedFound = deleted.map(function (d) { return String(d.DonationID); });
+  resyncLedger_();
+  out.resynced = true;
+  Logger.log('Deleted donations: ' + (out.deletedFound.length ? out.deletedFound.join(', ') : '(none)') + '; ledger+balances resynced.');
+  return out;
 }
 
 /* ==========================================================================

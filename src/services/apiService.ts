@@ -326,6 +326,15 @@ export const dataService = {
     return api.mutate(record, op, payload)
   },
 
+  // Ask the backend to rebuild the ledger + account balances from the live
+  // (non-deleted) records. Falls back safely when offline.
+  async resyncLedger(): Promise<{ success: boolean }> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('resyncLedger')) as { success: boolean }
+    }
+    return { success: true }
+  },
+
   // Persist settings (backend or mock).
   async saveSettings(settings: Settings): Promise<void> {
     await api.mutate('settings', 'update', settings)
