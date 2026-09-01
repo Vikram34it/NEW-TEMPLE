@@ -969,16 +969,26 @@ function normalizePhone_(p) {
 
 function nextIdFor_(sheetName, idColumnName, prefix) {
   var data = tableData_(sheetName, HEADERS[mapIdToHeaders_(sheetName)]);
+  // prefix already ends in '-' (e.g. 'DON-'), so match the digits AFTER it.
+  var used = {};
   var max = 0;
   data.forEach(function (row) {
     var val = String(row[idColumnName] || '');
-    var m = val.match(new RegExp(prefix + '-(\\d+)'));
+    var m = val.match(new RegExp(prefix + '(\\d+)'));
     if (m) {
       var n = parseInt(m[1], 10);
       if (n > max) max = n;
     }
+    used[val] = true;
   });
-  return prefix + (max + 1);
+  // Never hand out an id that is already present (protects against legacy
+  // duplicate rows / manual edits), and always bump past the current max.
+  var id = prefix + (max + 1);
+  while (used[id]) {
+    max += 1;
+    id = prefix + (max + 1);
+  }
+  return id;
 }
 
 function mapIdToHeaders_(sheetName) {
@@ -1081,17 +1091,21 @@ function softDeleteRecord_(sheetName, idCol, id) {
   var sheet = sheet_(sheetName);
   var data = tableData_(sheetName, HEADERS[mapIdToHeaders_(sheetName)]);
   var deletedCol = HEADERS[mapIdToHeaders_(sheetName)].indexOf('Deleted') + 1;
+  var found = 0;
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
+      found++;
       if (deletedCol > 0) {
         sheet.getRange(r + 2, deletedCol).setValue('TRUE');
       }
       audit_(toModule_(sheetName), 'SoftDelete', id, '', 'TRUE');
-      if (isLedgerSheet_(sheetName)) resyncLedger_();
-      return { success: true, softDeleted: true };
     }
   }
-  throw new Error('Record not found: ' + id);
+  if (found === 0) throw new Error('Record not found: ' + id);
+  // A duplicate id (which the sheet may contain from older versions) is fully
+  // cancelled too, otherwise the visible row can never be soft-deleted.
+  if (isLedgerSheet_(sheetName)) resyncLedger_();
+  return { success: true, softDeleted: found };
 }
 
 function hardDeleteRecord_(sheetName, idCol, id) {
@@ -1385,7 +1399,11 @@ function getReports_(params) {
  * ========================================================================== */
 
 function notDeleted_(row) {
-  return String(row.Deleted) !== 'TRUE';
+  // Tolerates checkbox cells (boolean TRUE), typed TRUE/'TRUE' strings, and
+  // blank or missing values. Anything truthy for "deleted" excludes the row.
+  var v = row && row.Deleted;
+  if (v === undefined || v === null || v === '') return true;
+  return !/^true$/i.test(String(v));
 }
 
 function toNum_(v) {
@@ -1478,53 +1496,51 @@ function reconcileLedger_() {
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
 
-  var desired = {};
+  // Manual entries (no DON-/EXP- id) must be preserved; auto-posted rows are
+  // rebuilt from the non-deleted donations/expenses so deleted records and
+  // their ledger rows always disappear together.
+  var manual = txData.filter(function (t) {
+    var ref = String(t.ReferenceID || '').toUpperCase();
+    return !(ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0);
+  });
+
+  var desired = [];
   donations.forEach(function (d) {
-    if (!notDeleted_(d)) return;
-    desired[String(d.DonationID).toUpperCase()] = {
+    desired.push({
       type: 'income', incomeOrExpense: 'income',
       amount: toNum_(d.Amount), date: String(d.Date),
       account: accountForPaymentMethod_(d.PaymentMethod),
       referenceID: String(d.DonationID),
       description: 'Donation - ' + (d.DonorName || ''),
       createdBy: d.ReceivedBy || 'system',
-    };
+    });
   });
   expenses.forEach(function (e) {
-    if (!notDeleted_(e)) return;
-    desired[String(e.ExpenseID).toUpperCase()] = {
+    desired.push({
       type: 'expense', incomeOrExpense: 'expense',
       amount: toNum_(e.Amount), date: String(e.Date),
       account: accountForPaymentMethod_(e.PaymentMethod),
       referenceID: String(e.ExpenseID),
       description: 'Expense - ' + (e.Description || ''),
       createdBy: e.PaidBy || 'system',
-    };
+    });
   });
 
-  // Drop every auto-posted transaction (DO NOT drop manual ones).
-  var rowsToDelete = [];
-  for (var i = 0; i < txData.length; i++) {
-    var ref = String(txData[i].ReferenceID || '').toUpperCase();
-    if (ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0) {
-      rowsToDelete.push(i + 2); // data starts at row 2
-    }
-  }
-  rowsToDelete.sort(function (a, b) { return b - a; }); // bottom-up so indices stay valid
-  for (var d2 = 0; d2 < rowsToDelete.length; d2++) {
-    txSheet.deleteRow(rowsToDelete[d2]);
-  }
-
-  // Add the desired entries.
-  for (var ref in desired) {
-    if (!desired.hasOwnProperty(ref)) continue;
-    var ent = desired[ref];
+  // Deterministic rebuild: clear the sheet's contents and rewrite the header,
+  // the surviving manual rows, and the desired auto rows in canonical order.
+  txSheet.getDataRange().clearContent();
+  txSheet.appendRow(txHeader);
+  manual.forEach(function (m) {
+    if (!m || !m.TransactionID) return;
+    txSheet.appendRow(txHeader.map(function (h) { return m[h] === undefined ? '' : m[h]; }));
+  });
+  desired.forEach(function (ent) {
     txSheet.appendRow([
       nextIdFor_(CONFIG.sheetNames.transactions, txHeader[0], 'TXN-'),
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
       ent.account, ent.referenceID, ent.description, ent.createdBy,
     ]);
-  }
+  });
 }
 
 /* Write CurrentBalance = OpeningBalance + income - expense per account. */
@@ -1603,7 +1619,7 @@ function runResyncLedger() {
 function fixDeletedDonations() {
   var out = { donations: [], deletedFound: [], resynced: false };
   var donations = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
-  var deleted = donations.filter(function (d) { return String(d.Deleted) === 'TRUE'; });
+  var deleted = donations.filter(function (d) { return !notDeleted_(d); });
   out.deletedFound = deleted.map(function (d) { return String(d.DonationID); });
   resyncLedger_();
   out.resynced = true;
