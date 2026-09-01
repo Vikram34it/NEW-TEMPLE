@@ -37,6 +37,31 @@ const AppContext = createContext<AppContextValue | null>(null)
 
 const CONFIG_USE_LIVE = !CONFIG.useMockData && !!CONFIG.webAppUrl
 
+const SESSION_KEY = 'temple_session_user'
+
+function loadSessionUser(): User | null {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && parsed.userID && parsed.email) {
+      return parsed as User
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function storeSessionUser(u: User | null) {
+  try {
+    if (u) window.localStorage.setItem(SESSION_KEY, JSON.stringify(u))
+    else window.localStorage.removeItem(SESSION_KEY)
+  } catch {
+    // localStorage may be unavailable (e.g. private mode); session still works in-memory
+  }
+}
+
 let seq = 100
 let toastSeq = 0
 
@@ -149,7 +174,7 @@ interface AppContextValue {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<User | null>(loadSessionUser)
   const [loading, setLoading] = useState(true)
 
   const [users, setUsers] = useState<User[]>([])
@@ -313,6 +338,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const finish = (msg: string | null, u: User | null) => {
         if (!msg && u) {
           setUser(u)
+          storeSessionUser(u)
           audit('Login', 'Auth', u.userID)
         }
         resolve(msg)
@@ -339,6 +365,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   function logout() {
     audit('Logout', 'Auth', user?.userID || '')
     setUser(null)
+    storeSessionUser(null)
   }
 
   const can = (permission: string): boolean => {
@@ -366,6 +393,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         Object.assign(d, { donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() } as Partial<Donation>)
       }
       const created = (await dataService.persist('donations', 'create', { ...d })) as Donation
+      if (isLive) {
+        // Guarantee the donation is posted to the Transactions ledger before the
+        // UI refreshes, so a donation never appears without its transaction.
+        await dataService.resyncLedger().catch(() => {})
+      }
       notify('success', 'Donation saved')
       await refreshAll()
       if (!isLive) audit('Create', 'Donations', created.donationID)
@@ -415,6 +447,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         created.push((await dataService.persist('donations', 'create', { ...item })) as Donation)
       }
+      if (isLive) {
+        // Ensure every imported donation is posted to the ledger before refresh.
+        await dataService.resyncLedger().catch(() => {})
+      }
       notify('success', `${created.length} donation${created.length === 1 ? '' : 's'} saved`)
       await refreshAll()
       if (!isLive) audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
@@ -435,6 +471,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         Object.assign(e, { expenseID: id, createdAt: new Date().toISOString() } as Partial<Expense>)
       }
       const created = (await dataService.persist('expenses', 'create', { ...e })) as Expense
+      if (isLive) {
+        // Ensure the expense is posted to the ledger before the UI refreshes.
+        await dataService.resyncLedger().catch(() => {})
+      }
       notify('success', 'Expense saved')
       await refreshAll()
       if (!isLive) audit('Create', 'Expenses', created.expenseID)
@@ -484,6 +524,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } as Partial<Expense>)
         }
         created.push((await dataService.persist('expenses', 'create', { ...item })) as Expense)
+      }
+      if (isLive) {
+        // Ensure imported expenses are posted to the ledger before refresh.
+        await dataService.resyncLedger().catch(() => {})
       }
       notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
       await refreshAll()

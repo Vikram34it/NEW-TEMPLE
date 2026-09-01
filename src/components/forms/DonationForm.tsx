@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useApp } from '../../context/AppContext'
-import { Button, Field, Input, Select, Textarea } from '../ui'
+import { Button, Field, Input, Modal, Select, Textarea } from '../ui'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../../utils/constants'
+import type { Person } from '../../types'
 
 interface Props {
   initial?: Partial<DonationLike>
@@ -56,11 +57,12 @@ interface DonorOption {
 }
 
 export function DonationForm({ initial, onDone }: Props) {
-  const { addDonation, updateDonation, user, people, donations } = useApp()
+  const { addDonation, updateDonation, user, people, donations, addPerson } = useApp()
   const [form, setForm] = useState<DonationLike>({ ...empty, ...initial })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [customCategory, setCustomCategory] = useState(false)
+  const [showAddPerson, setShowAddPerson] = useState(false)
 
   // Build the donor pick-list from BOTH saved people tagged as Donor AND any
   // donor name seen on past donations, so every past donor can be picked.
@@ -112,6 +114,13 @@ export function DonationForm({ initial, onDone }: Props) {
     }
   }
 
+  // After a new person/donor is added, auto-fill the donation fields with their
+  // details and switch the donor picker to them.
+  const handlePersonAdded = (p: Person) => {
+    handlePickDonor(p.name)
+    setShowAddPerson(false)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.donorName.trim()) return setError('Donor name is required')
@@ -134,8 +143,18 @@ export function DonationForm({ initial, onDone }: Props) {
     }
   }
 
+  // Prevent the Enter key (in any input/select) from submitting the form early.
+  // Donations should only be saved when the user explicitly clicks "Add Donation".
+  const preventEarlySubmit = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    const target = e.target as HTMLElement
+    const tag = target.tagName
+    // Allow Enter in the textarea (to add newlines) and on the submit button.
+    if (tag === 'TEXTAREA' || tag === 'BUTTON') return
+    if (e.key === 'Enter') e.preventDefault()
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} onKeyDown={preventEarlySubmit} className="space-y-4">
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
 
       <div className="grid sm:grid-cols-2 gap-4">
@@ -143,16 +162,19 @@ export function DonationForm({ initial, onDone }: Props) {
           <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} required />
         </Field>
         <Field label="Choose a Donor (optional)">
-          <select
-            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none"
-            value={form.donorName}
-            onChange={(e) => handlePickDonor(e.target.value)}
-          >
-            <option value="">— Pick a past donor (or type below) —</option>
-            {donorOptions.map((d) => (
-              <option key={d.name} value={d.name}>{d.name}</option>
-            ))}
-          </select>
+          <div className="flex gap-2">
+            <select
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none"
+              value={form.donorName}
+              onChange={(e) => handlePickDonor(e.target.value)}
+            >
+              <option value="">— Pick a past donor (or type below) —</option>
+              {donorOptions.map((d) => (
+                <option key={d.name} value={d.name}>{d.name}</option>
+              ))}
+            </select>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddPerson(true)}>+ Add Person</Button>
+          </div>
           <p className="text-[11px] text-slate-400 mt-1">Tip: picking a donor fills in their saved contact details, PAN and Aadhaar — leave the date, amount and transaction reference fresh each time.</p>
         </Field>
       </div>
@@ -245,6 +267,80 @@ export function DonationForm({ initial, onDone }: Props) {
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.donationID ? 'Save Changes' : 'Add Donation'}</Button>
+      </div>
+
+      <Modal open={showAddPerson} onClose={() => setShowAddPerson(false)} title="Add New Person / Donor">
+        <AddPersonForm onDone={handlePersonAdded} onCancel={() => setShowAddPerson(false)} addPerson={addPerson} />
+      </Modal>
+    </form>
+  )
+}
+
+function AddPersonForm({ onDone, onCancel, addPerson }: {
+  onDone: (p: Person) => void
+  onCancel: () => void
+  addPerson: (p: Omit<Person, 'personID'>) => Promise<Person>
+}) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [address, setAddress] = useState('')
+  const [city, setCity] = useState('')
+  const [panNumber, setPanNumber] = useState('')
+  const [aadhaarNumber, setAadhaarNumber] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) return setError('Name is required')
+    setError('')
+    setSaving(true)
+    try {
+      const created = await addPerson({
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        personType: ['Donor'],
+        joinDate: new Date().toISOString().slice(0, 10),
+        status: 'active',
+        notes: '',
+        panNumber: panNumber.trim() || undefined,
+        aadhaarNumber: aadhaarNumber.trim() || undefined,
+      })
+      onDone(created)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add person')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} onKeyDown={(e) => { if ((e.target as HTMLElement).tagName !== 'TEXTAREA' && (e.target as HTMLElement).tagName !== 'BUTTON' && e.key === 'Enter') e.preventDefault() }} className="space-y-4">
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required /></Field>
+        <Field label="Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" /></Field>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" /></Field>
+        <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" /></Field>
+      </div>
+      <Field label="Address"><Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Address" /></Field>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="PAN Number" hint="Needed if the donor wants a tax (80G) receipt">
+          <Input value={panNumber} onChange={(e) => setPanNumber(e.target.value)} placeholder="ABCDE1234F" />
+        </Field>
+        <Field label="Aadhaar Number">
+          <Input value={aadhaarNumber} onChange={(e) => setAadhaarNumber(e.target.value)} placeholder="12-digit number" maxLength={12} />
+        </Field>
+      </div>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add Person'}</Button>
       </div>
     </form>
   )
