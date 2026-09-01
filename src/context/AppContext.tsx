@@ -475,22 +475,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const isLive = CONFIG_USE_LIVE
     const created: Donation[] = []
     try {
-      for (const item of items) {
-        if (!isLive) {
+      if (isLive) {
+        // Live mode: send all records in a single HTTP request. The backend
+        // generates IDs, appends rows, and resyncs the ledger once.
+        if (items.length > 0) {
+          await dataService.bulkPersist('donations', items as Array<Record<string, unknown>>)
+        }
+      } else {
+        for (const item of items) {
           const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
           const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
           Object.assign(item, { donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() } as Partial<Donation>)
+          created.push((await dataService.persist('donations', 'create', { ...item })) as Donation)
         }
-        created.push((await dataService.persist('donations', 'create', { ...item })) as Donation)
       }
-      if (isLive) {
-        // Ensure every imported donation is posted to the ledger before refresh.
-        await dataService.resyncLedger().catch(() => {})
-      }
-      notify('success', `${created.length} donation${created.length === 1 ? '' : 's'} saved`)
+      notify('success', `${items.length} donation${items.length === 1 ? '' : 's'} saved`)
       await refreshAll()
       if (!isLive) audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
-      return created
+      return isLive ? [] : created
     } catch (err) {
       notify('error', errMsg(err))
       await refreshAllSafe()
@@ -581,16 +583,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const isLive = CONFIG_USE_LIVE
     const created: Transaction[] = []
     try {
-      for (const item of items) {
-        if (!isLive) {
-          Object.assign(item, { transactionID: `TXN-2026-${String(nextSeq() + 1).padStart(4, '0')}` } as Partial<Transaction>)
+      if (isLive) {
+        // Live mode: send all records in a single HTTP request.
+        if (items.length > 0) {
+          await dataService.bulkPersist('transactions', items as Array<Record<string, unknown>>)
         }
-        created.push((await dataService.persist('transactions', 'create', { ...item })) as Transaction)
+      } else {
+        for (const item of items) {
+          Object.assign(item, { transactionID: `TXN-2026-${String(nextSeq() + 1).padStart(4, '0')}` } as Partial<Transaction>)
+          created.push((await dataService.persist('transactions', 'create', { ...item })) as Transaction)
+        }
       }
-      notify('success', `${created.length} transaction${created.length === 1 ? '' : 's'} imported`)
+      notify('success', `${items.length} transaction${items.length === 1 ? '' : 's'} imported`)
       await refreshAll()
       if (!isLive) audit('BulkCreate', 'Transactions', `${created.length} records`)
-      return created
+      return isLive ? [] : created
     } catch (err) {
       notify('error', errMsg(err))
       await refreshAllSafe()

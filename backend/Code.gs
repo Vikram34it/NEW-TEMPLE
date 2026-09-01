@@ -356,6 +356,7 @@ function route_(action, params, body, method) {
 
     // --- Writes (generic CRUD, one endpoint per table) ---
     case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
+    case 'bulkCreateDonations': return bulkCreateRecords_(CONFIG.sheetNames.donations, HEADERS.donations, body.records, 'DON-', 'donation', ['DonorName', 'Amount']);
     case 'updateDonation': return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DonationID');
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
 
@@ -385,6 +386,7 @@ function route_(action, params, body, method) {
     case 'deleteUser': return hardDeleteRecord_(CONFIG.sheetNames.users, 'UserID', body.id);
 
     case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
+    case 'bulkCreateTransactions': return bulkCreateRecords_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.records, 'TXN-', 'transaction', []);
     case 'updateSettings': return updateSettings_(body.settings);
     case 'login': return login_(body);
 
@@ -1057,6 +1059,107 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   return readRowById_(sheetName, headers, idCol, id, row, sheet.getLastRow());
 }
 
+/* Bulk create: accept an array of records, generate all IDs in one pass,
+ * append them all at once, audit in batch, and resync the ledger only once.
+ * This replaces N individual createRecord_() calls + N ledger rebuilds with
+ * a single pass, turning O(N²) into O(N). */
+function bulkCreateRecords_(sheetName, headers, records, prefix, module, required) {
+  if (!Array.isArray(records) || records.length === 0) {
+    throw new Error('No records provided for bulk create');
+  }
+
+  var sheet = sheet_(sheetName);
+  var idCol = headers[0];
+  var now = new Date().toISOString();
+
+  // 1. Read the sheet once to find the current max ID.
+  var data = tableData_(sheetName, HEADERS[mapIdToHeaders_(sheetName)]);
+  var max = 0;
+  var used = {};
+  data.forEach(function (row) {
+    var val = String(row[idCol] || '');
+    var m = val.match(new RegExp(prefix + '(\\d+)'));
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+    used[val] = true;
+  });
+
+  // 2. Generate all IDs sequentially without re-reading the sheet.
+  var rows = [];
+  var created = [];
+  var receiptPrefix = null;
+  if (module === 'donation') {
+    receiptPrefix = String(getSettings_().receiptPrefix || 'REC');
+  }
+
+  for (var i = 0; i < records.length; i++) {
+    var record = records[i];
+    validateRecord_(record, required || []);
+
+    // Generate unique ID
+    max += 1;
+    var id = prefix + max;
+    while (used[id]) {
+      max += 1;
+      id = prefix + max;
+    }
+    used[id] = true;
+
+    // Set module-specific auto-generated fields
+    if (module === 'donation') {
+      record.DonationID = id;
+      record.ReceiptNumber = receiptPrefix + '-' + id.split('-')[1] + '-' + pad4_(parseIdNumber(id));
+      record.CreatedAt = now;
+    }
+    if (module === 'transaction') {
+      record.TransactionID = id;
+    }
+
+    // Build the row array matching header order
+    var row = [];
+    for (var h = 0; h < headers.length; h++) {
+      var val = record[headers[h]];
+      if (headers[h] === idCol) val = id;
+      row.push(val === undefined ? '' : val);
+    }
+    rows.push(row);
+  }
+
+  // 3. Append all rows at once (single spreadsheet write instead of N writes).
+  if (rows.length > 0) {
+    var startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  // 4. Audit log: write all entries in batch.
+  try {
+    var auditSheet = sheet_(CONFIG.sheetNames.audit);
+    var auditRows = [];
+    var ts = new Date().toISOString();
+    var user = Session.getActiveUser().getEmail() || 'system';
+    for (var j = 0; j < records.length; j++) {
+      auditRows.push([
+        'LOG-' + new Date().getTime() + '-' + j,
+        ts, user, 'Create', module, rows[j][0], '', JSON.stringify(records[j]),
+      ]);
+    }
+    if (auditRows.length > 0) {
+      var auditStart = auditSheet.getLastRow() + 1;
+      auditSheet.getRange(auditStart, 1, auditRows.length, HEADERS.audit.length).setValues(auditRows);
+    }
+  } catch (err) {
+    console.log('Bulk audit write failed: ' + err);
+  }
+
+  // 5. Resync ledger only ONCE for the entire batch.
+  if (isBalanceSheet_(sheetName)) resyncLedger_();
+
+  // Return the created records with their IDs
+  return { created: records.length, prefix: prefix };
+}
+
 function readRowById_(sheetName, headers, idCol, id, row, rowNumber) {
   var obj = {};
   for (var i = 0; i < headers.length; i++) obj[headers[i]] = row[i];
@@ -1476,6 +1579,11 @@ function isConstructionTagged_(category, purpose, projectName) {
  * Construction is NOT diverted here - the bank statement must match reality. */
 function accountForPaymentMethod_(method) {
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+  return accountForPaymentMethodCached_(method, accounts);
+}
+
+/* Same logic but uses a pre-read accounts array to avoid re-reading per call. */
+function accountForPaymentMethodCached_(method, accounts) {
   var target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank';
   for (var i = 0; i < accounts.length; i++) {
     if (String(accounts[i].Type).toLowerCase() === target) return accounts[i].AccountName;
@@ -1495,6 +1603,8 @@ function reconcileLedger_() {
 
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
+  // Cache accounts once instead of re-reading per donation/expense.
+  var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
 
   // Manual entries (no DON-/EXP- id) must be preserved; auto-posted rows are
   // rebuilt from the non-deleted donations/expenses so deleted records and
@@ -1509,7 +1619,7 @@ function reconcileLedger_() {
     desired.push({
       type: 'income', incomeOrExpense: 'income',
       amount: toNum_(d.Amount), date: String(d.Date),
-      account: accountForPaymentMethod_(d.PaymentMethod),
+      account: accountForPaymentMethodCached_(d.PaymentMethod, accounts),
       referenceID: String(d.DonationID),
       description: 'Donation - ' + (d.DonorName || ''),
       createdBy: d.ReceivedBy || 'system',
@@ -1519,7 +1629,7 @@ function reconcileLedger_() {
     desired.push({
       type: 'expense', incomeOrExpense: 'expense',
       amount: toNum_(e.Amount), date: String(e.Date),
-      account: accountForPaymentMethod_(e.PaymentMethod),
+      account: accountForPaymentMethodCached_(e.PaymentMethod, accounts),
       referenceID: String(e.ExpenseID),
       description: 'Expense - ' + (e.Description || ''),
       createdBy: e.PaidBy || 'system',
@@ -1530,13 +1640,20 @@ function reconcileLedger_() {
   // the surviving manual rows, and the desired auto rows in canonical order.
   txSheet.getDataRange().clearContent();
   txSheet.appendRow(txHeader);
+
+  // Pre-compute the next available TXN ID once instead of calling nextIdFor_()
+  // per row (which re-reads the entire sheet each time — O(N²)).
+  var nextTxnNum = 0;
   manual.forEach(function (m) {
     if (!m || !m.TransactionID) return;
     txSheet.appendRow(txHeader.map(function (h) { return m[h] === undefined ? '' : m[h]; }));
+    var tm = String(m.TransactionID || '').match(/TXN-(\d+)/);
+    if (tm) { var n = parseInt(tm[1], 10); if (n > nextTxnNum) nextTxnNum = n; }
   });
   desired.forEach(function (ent) {
+    nextTxnNum += 1;
     txSheet.appendRow([
-      nextIdFor_(CONFIG.sheetNames.transactions, txHeader[0], 'TXN-'),
+      'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
       ent.account, ent.referenceID, ent.description, ent.createdBy,
     ]);

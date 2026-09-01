@@ -400,6 +400,25 @@ export const dataService = {
     return api.mutate(record, op, payload)
   },
 
+  // Bulk create: send all records in a single HTTP request (live) or loop
+  // through the mock store. This replaces N individual persist() calls.
+  async bulkPersist(record: RecordName, items: Array<Record<string, unknown>>): Promise<unknown> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      const action = record === 'donations' ? 'bulkCreateDonations'
+        : record === 'transactions' ? 'bulkCreateTransactions'
+        : null
+      if (!action) throw new Error('Bulk create not supported for: ' + record)
+      const serialized = items.map((item) => serialize(record, item, 'create'))
+      return apiFetch(action, {}, { records: serialized })
+    }
+    // Mock mode: create each record individually
+    const results: unknown[] = []
+    for (const item of items) {
+      results.push(await api.mutate(record, 'create', item))
+    }
+    return results
+  },
+
   // Ask the backend to rebuild the ledger + account balances from the live
   // (non-deleted) records. Falls back safely when offline.
   async resyncLedger(): Promise<{ success: boolean }> {
