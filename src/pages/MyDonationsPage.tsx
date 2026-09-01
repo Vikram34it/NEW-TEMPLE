@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Receipt } from 'lucide-react'
+import { Receipt, Wallet, HeartHandshake, CalendarDays, TrendingUp } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { PageHeader, Badge, Button } from '../components/ui'
+import { PageHeader, Badge, Button, StatCard } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { ReceiptModal } from '../components/ReceiptModal'
@@ -26,6 +26,9 @@ export function MyDonationsPage() {
   }, [donations, user?.email, user?.phone])
 
   const total = mine.reduce((s, d) => s + d.amount, 0)
+  const firstDate = mine.length ? new Date(Math.min(...mine.map((d) => new Date(d.date).getTime()))) : null
+  const lastDate = mine.length ? new Date(Math.max(...mine.map((d) => new Date(d.date).getTime()))) : null
+  const average = mine.length ? total / mine.length : 0
 
   const columns: Column<Donation>[] = [
     { header: 'Date', accessor: (d) => formatDate(d.date), sortable: true, sortKey: 'date' },
@@ -44,11 +47,26 @@ export function MyDonationsPage() {
         subtitle={`Welcome, ${user?.name} — you have made ${mine.length} donation${mine.length === 1 ? '' : 's'} totalling ${formatCurrency(total)}`}
       />
 
+      {mine.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard label="Total Donated" value={formatCurrency(total)} icon={<Wallet size={20} />} color="orange" />
+          <StatCard label="No. of Donations" value={String(mine.length)} icon={<HeartHandshake size={20} />} color="green" />
+          <StatCard label="Average Donation" value={formatCurrency(average)} icon={<TrendingUp size={20} />} color="blue" />
+          <StatCard
+            label="First Donation"
+            value={firstDate ? formatDate(firstDate.toISOString()) : '—'}
+            icon={<CalendarDays size={20} />}
+            color="violet"
+            sub={lastDate ? `Latest: ${formatDate(lastDate.toISOString())}` : undefined}
+          />
+        </div>
+      )}
+
       {mine.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
           <Receipt size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500">No donations found for your email address yet.</p>
-          <p className="text-xs text-slate-400 mt-1">If you have donated, please contact the temple office so your records can be linked to your email.</p>
+          <p className="text-slate-500">No donations found for your mobile number or email yet.</p>
+          <p className="text-xs text-slate-400 mt-1">If you have donated, please contact the temple office so your records can be linked to your number or email.</p>
         </div>
       ) : (
         <DataTable
