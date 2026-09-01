@@ -78,8 +78,26 @@ function padDate_(y: number, mo: number, d: number): string {
   return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
+// Hints that tag a donation/expense as construction / temple-building. Used by
+// the Construction fund tracker (NOT for posting money - see below).
+const CONSTRUCTION_HINTS = [
+  'construction', 'land', 'mandir', 'bhoomi', 'renovation', 'redevelopment',
+  'cement', 'steel', 'sand', 'bricks', 'labour', 'electrical work',
+  'plumbing', 'painting', 'marble', 'woodwork', 'equipment', 'transportation',
+]
+
+// True when a donation/expense is tagged as construction-related, based on its
+// category / purpose / project text.
+export function isConstructionTagged(record: { category?: string; purpose?: string; projectName?: string }): boolean {
+  const hint = [record.category, record.purpose, record.projectName].filter(Boolean).join(' ').toLowerCase()
+  return CONSTRUCTION_HINTS.some((k) => hint.includes(k))
+}
+
 // Cash payments go to the cash account; everything else (UPI, bank transfer,
-// cheque, card, other) goes to the bank account.
+// cheque, card, other) goes to the bank account. Construction donations are NOT
+// diverted here - physical money always lands in Cash / Main Bank so the bank
+// statement matches reality. Construction totals are tracked separately via
+// isConstructionTagged().
 export function accountNameForPaymentMethod(method: string, accounts: Account[]): string {
   const target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank'
   const acc = accounts.find((a) => a.type === target)

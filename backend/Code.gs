@@ -1321,6 +1321,12 @@ function buildDashboard_() {
     .filter(function (e) { return constructionCategories.indexOf(e.Category) >= 0; })
     .reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
 
+  // How much donation money has come in tagged for construction (tracking only
+  // - the actual money is held in Cash / Main Bank by payment method).
+  var constructionDonations = donations
+    .filter(function (d) { return isConstructionTagged_(d.Category, d.Purpose, ''); })
+    .reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
+
   var cash = accounts.filter(function (a) { return a.Type === 'cash'; })[0];
   var bank = accounts.filter(function (a) { return a.Type === 'bank'; })[0];
 
@@ -1337,6 +1343,7 @@ function buildDashboard_() {
     totalDonations: totalDonations,
     totalExpenses: totalExpenses,
     totalConstructionExpenses: totalConstruction,
+    constructionDonations: constructionDonations,
     cashBalance: cash ? toNum_(cash.CurrentBalance) : 0,
     bankBalance: bank ? toNum_(bank.CurrentBalance) : 0,
     pendingPayments: pendingTotal,
@@ -1429,8 +1436,26 @@ function monthlyTrend_(donations, expenses) {
  * to the Accounts sheet. Both are idempotent and safe to run on every request.
  * ========================================================================== */
 
+/* Keywords tagging a donation/expense as construction / temple-building. Used
+ * ONLY by the Construction fund tracker - physical money always lands in Cash /
+ * Main Bank (see accountForPaymentMethod_). */
+var CONSTRUCTION_HINTS_ = [
+  'construction', 'land', 'mandir', 'bhoomi', 'renovation', 'redevelopment',
+  'cement', 'steel', 'sand', 'bricks', 'labour', 'electrical work',
+  'plumbing', 'painting', 'marble', 'woodwork', 'equipment', 'transportation'
+];
+
+function isConstructionTagged_(category, purpose, projectName) {
+  var hint = (String(category || '') + ' ' + String(purpose || '') + ' ' + String(projectName || '')).toLowerCase();
+  for (var k = 0; k < CONSTRUCTION_HINTS_.length; k++) {
+    if (hint.indexOf(CONSTRUCTION_HINTS_[k]) >= 0) return true;
+  }
+  return false;
+}
+
 /* Which account a payment method belongs to: cash -> the cash account,
- * anything else (UPI / bank transfer / cheque / card) -> the bank account. */
+ * anything else (UPI / bank transfer / cheque / card) -> the bank account.
+ * Construction is NOT diverted here - the bank statement must match reality. */
 function accountForPaymentMethod_(method) {
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
   var target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank';

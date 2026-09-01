@@ -16,7 +16,7 @@ const accountIcon = (type: string) => {
 }
 
 export function AccountsPage() {
-  const { accounts, transactions, can, addAccount } = useApp()
+  const { accounts, transactions, dashboard, can, addAccount } = useApp()
   const [showAdd, setShowAdd] = useState(false)
 
   const accountTxs = (account: string) => transactions.filter((t) => t.account === account)
@@ -26,7 +26,7 @@ export function AccountsPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Accounts</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Cash and bank balances</p>
+          <p className="text-sm text-slate-500 mt-0.5">Cash and bank balances · construction fund tracker</p>
         </div>
         {can('*') && <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Account</Button>}
       </div>
@@ -34,19 +34,33 @@ export function AccountsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {accounts.map((a) => {
           const txs = accountTxs(a.accountName)
-          const received = txs.filter((t) => t.incomeOrExpense === 'income').reduce((s, t) => s + t.amount, 0)
-          const spent = txs.filter((t) => t.incomeOrExpense === 'expense').reduce((s, t) => s + t.amount, 0)
+          let received = txs.filter((t) => t.incomeOrExpense === 'income').reduce((s, t) => s + t.amount, 0)
+          let spent = txs.filter((t) => t.incomeOrExpense === 'expense').reduce((s, t) => s + t.amount, 0)
+          let balance = a.currentBalance
+          let isFundTracker = false
+          if (a.type === 'construction' && dashboard) {
+            // Construction money physically stays in Cash/Bank, so this card
+            // reports the fund tracker instead of account transactions.
+            isFundTracker = true
+            received = dashboard.constructionDonations
+            spent = dashboard.totalConstructionExpenses
+            balance = a.openingBalance + received - spent
+          }
           return (
             <Card key={a.accountID} className="p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className={`p-2.5 rounded-lg bg-orange-50 text-orange-600`}>{accountIcon(a.type)}</div>
                 <div>
                   <p className="font-semibold text-slate-700 text-sm">{a.accountName}</p>
-                  <p className="text-[11px] text-slate-400 capitalize">{a.type} account</p>
+                  <p className="text-[11px] text-slate-400 capitalize">
+                    {isFundTracker ? 'construction fund tracker' : `${a.type} account`}
+                  </p>
                 </div>
               </div>
-              <p className="text-2xl font-bold text-slate-800">{formatCurrency(a.currentBalance)}</p>
-              <p className="text-[11px] text-slate-400">Opening: {formatCurrency(a.openingBalance)}</p>
+              <p className="text-2xl font-bold text-slate-800">{formatCurrency(balance)}</p>
+              <p className="text-[11px] text-slate-400">
+                {isFundTracker ? 'Donations − expenses' : `Opening: ${formatCurrency(a.openingBalance)}`}
+              </p>
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
                 <div className="bg-emerald-50 rounded-lg p-2">
                   <p className="text-slate-500">Received</p>

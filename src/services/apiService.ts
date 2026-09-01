@@ -223,6 +223,7 @@ class MockStore {
 
   reset() {
     this.data = { ...mockData }
+    reconcileMockLedger()
   }
 }
 
@@ -287,6 +288,10 @@ export function reconcileMockLedger() {
     return { ...ac, currentBalance: ac.openingBalance + inc - exp }
   })
 }
+
+// Reconcile once at startup so mock account balances + transactions reflect the
+// seeded donations/expenses and the construction routing below.
+reconcileMockLedger()
 
 export const api = {
   async load(record: RecordName, params: Record<string, string> = {}): Promise<unknown> {
@@ -373,8 +378,9 @@ export const dataService = {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
       return apiFetch('getDashboardData') as Promise<DashboardData>
     }
-    const { donations, expenses, accounts, pendingPayments, projects } = mockStore.data
-    return buildDashboardData(donations, expenses, accounts, pendingPayments, projects)
+    const { expenses, accounts, pendingPayments, projects } = mockStore.data
+    reconcileMockLedger()
+    return buildDashboardData(mockStore.data.donations, expenses, accounts, pendingPayments, projects)
   },
 
   async getReports(): Promise<unknown> {

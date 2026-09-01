@@ -104,7 +104,13 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Construction Expenses" value={formatCurrency(dashboard.totalConstructionExpenses)} icon={<HardHat size={20} />} color="amber" />
+        <StatCard
+          label="Construction Fund Received"
+          value={formatCurrency(dashboard.constructionDonations)}
+          icon={<HardHat size={20} />}
+          color="amber"
+          sub={`Spent: ${formatCurrency(dashboard.totalConstructionExpenses)} • Balance: ${formatCurrency(dashboard.constructionDonations - dashboard.totalConstructionExpenses)}`}
+        />
         <StatCard label="Pending Payments" value={formatCurrency(dashboard.pendingPayments)} icon={<Clock size={20} />} color="violet" />
         <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
         <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />

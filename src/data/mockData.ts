@@ -1,3 +1,4 @@
+import { isConstructionTagged } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -209,17 +210,16 @@ export function buildDashboardData(
     .filter((e) => constructionCategories.includes(e.category))
     .reduce((s, e) => s + e.amount, 0)
 
-  // Derive balances from actual data, never trust stored currentBalance.
-  // bank = opening + all non-cash income − all non-cash expense
-  // cash = opening + all cash income − all cash expense
-  const cashAccount = accounts.find((a) => a.type === 'cash')
-  const bankAccount = accounts.find((a) => a.type === 'bank')
-  const cashIncome = donations.filter((d) => d.paymentMethod === 'Cash').reduce((s, d) => s + d.amount, 0)
-  const cashExpense = expenses.filter((e) => e.paymentMethod === 'Cash').reduce((s, e) => s + e.amount, 0)
-  const bankIncome = donations.filter((d) => d.paymentMethod !== 'Cash').reduce((s, d) => s + d.amount, 0)
-  const bankExpense = expenses.filter((e) => e.paymentMethod !== 'Cash').reduce((s, e) => s + e.amount, 0)
-  const cashBalance = (cashAccount?.openingBalance || 0) + cashIncome - cashExpense
-  const bankBalance = (bankAccount?.openingBalance || 0) + bankIncome - bankExpense
+  // How much donation money has come in tagged for construction (tracking
+  // only - the actual money is held in Cash / Main Bank by payment method).
+  const constructionDonations = donations
+    .filter(isConstructionTagged)
+    .reduce((s, d) => s + d.amount, 0)
+
+  // Balances mirror the reconciled ledger accounts (construction money lives in
+  // the Construction account, so cash/bank here are the non-construction balances).
+  const cashBalance = accounts.find((a) => a.type === 'cash')?.currentBalance || 0
+  const bankBalance = accounts.find((a) => a.type === 'bank')?.currentBalance || 0
 
   const pendingTotal = pendingPayments
     .filter((p) => p.status !== 'paid')
@@ -273,6 +273,7 @@ export function buildDashboardData(
     totalDonations,
     totalExpenses,
     totalConstructionExpenses,
+    constructionDonations,
     cashBalance,
     bankBalance,
     pendingPayments: pendingTotal,

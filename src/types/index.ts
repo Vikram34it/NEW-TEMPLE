@@ -184,6 +184,7 @@ export interface DashboardData {
   totalDonations: number
   totalExpenses: number
   totalConstructionExpenses: number
+  constructionDonations: number
   cashBalance: number
   bankBalance: number
   pendingPayments: number
