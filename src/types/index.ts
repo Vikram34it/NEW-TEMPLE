@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'accountant' | 'manager' | 'viewer'
+export type Role = 'admin' | 'accountant' | 'manager' | 'viewer' | 'donor'
 
 export interface User {
   userID: string
@@ -8,6 +8,7 @@ export interface User {
   status: 'active' | 'inactive'
   createdDate: string
   password: string
+  phone?: string
 }
 
 export interface Person {

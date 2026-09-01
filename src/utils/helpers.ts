@@ -42,6 +42,15 @@ export function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+// Keep only the digits of a phone/mobile number, dropping +91 / 0 prefixes so
+// '9845012345', '+91 98450 12345' and '09845012345' all match.
+export function normalizePhone(phone: string): string {
+  let digits = String(phone || '').replace(/\D/g, '')
+  if (digits.length > 10 && digits.substring(0, 2) === '91') digits = digits.substring(2)
+  if (digits.length > 10 && digits.charAt(0) === '0') digits = digits.substring(1)
+  return digits
+}
+
 // Accepts ISO (yyyy-mm-dd) or Indian (dd-mm-yyyy) dates and returns a
 // normalised yyyy-mm-dd string, or '' if not a valid date.
 export function parseDateInput(raw: string): string {

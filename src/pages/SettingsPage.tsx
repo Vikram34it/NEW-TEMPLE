@@ -303,6 +303,7 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
     case 'accountant': return 'blue'
     case 'manager': return 'orange'
     case 'viewer': return 'slate'
+    case 'donor': return 'violet'
   }
 }
 
@@ -339,6 +340,9 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
       <Field label="Full Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
       <Field label="Email" required><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></Field>
+      <Field label="Mobile Number" hint="Donor portal matches donations by mobile first, then email">
+        <Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 9845012345" />
+      </Field>
       {!initial?.userID && (
         <Field label="Password" required><Input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Set password" required /></Field>
       )}
@@ -348,6 +352,7 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
           <option value="accountant">Accountant</option>
           <option value="manager">Manager</option>
           <option value="viewer">Viewer</option>
+          <option value="donor">Donor (own donations only)</option>
         </Select>
       </Field>
       <Field label="Status">

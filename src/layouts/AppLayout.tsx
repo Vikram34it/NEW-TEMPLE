@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, Navigate } from 'react-router-dom'
+import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { Header } from '../components/Header'
 import { useApp } from '../context/AppContext'
@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext'
 export function AppLayout() {
   const { user, loading } = useApp()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -20,6 +21,11 @@ export function AppLayout() {
   }
 
   if (!user) return <Navigate to="/login" replace />
+
+  // Donors may only use their own-donations portal. Block every staff page.
+  if (user.role === 'donor' && location.pathname !== '/my-donations') {
+    return <Navigate to="/my-donations" replace />
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">

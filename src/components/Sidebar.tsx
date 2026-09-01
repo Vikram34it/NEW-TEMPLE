@@ -26,6 +26,7 @@ import { useApp } from '../context/AppContext'
 
 const icons: Record<string, React.ReactNode> = {
   '/': <LayoutDashboard size={18} />,
+  '/my-donations': <Heart size={18} />,
   '/donations': <HandCoins size={18} />,
   '/expenses': <Receipt size={18} />,
   '/people': <Users size={18} />,

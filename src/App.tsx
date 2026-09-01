@@ -1,8 +1,9 @@
-import { HashRouter, Routes, Route } from 'react-router-dom'
-import { AppProvider } from './context/AppContext'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AppProvider, useApp } from './context/AppContext'
 import { AppLayout, RoleGuard } from './layouts/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { MyDonationsPage } from './pages/MyDonationsPage'
 import { DonationsPage } from './pages/DonationsPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { PeoplePage } from './pages/PeoplePage'
@@ -27,7 +28,15 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AppLayout />}>
-            <Route path="/" element={<DashboardPage />} />
+            <Route path="/" element={<HomeRoute />} />
+            <Route
+              path="/my-donations"
+              element={
+                <RoleGuard roles={['donor']}>
+                  <MyDonationsPage />
+                </RoleGuard>
+              }
+            />
             <Route path="/donations" element={<DonationsPage />} />
             <Route path="/expenses" element={<ExpensesPage />} />
             <Route path="/people" element={<PeoplePage />} />
@@ -51,10 +60,18 @@ export default function App() {
                 </RoleGuard>
               }
             />
-            <Route path="*" element={<DashboardPage />} />
+            <Route path="*" element={<HomeRoute />} />
           </Route>
         </Routes>
       </HashRouter>
     </AppProvider>
   )
+}
+
+// Staff land on the dashboard; donors are sent to their own-donations portal.
+function HomeRoute() {
+  const { user } = useApp()
+  const isDonor = user?.role === 'donor'
+  if (isDonor) return <Navigate to="/my-donations" replace />
+  return <DashboardPage />
 }

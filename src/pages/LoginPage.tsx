@@ -13,6 +13,7 @@ const demoAccounts = [
   { role: 'Accountant', email: 'accountant@temple.org', pass: 'accountant123' },
   { role: 'Manager', email: 'manager@temple.org', pass: 'manager123' },
   { role: 'Viewer', email: 'viewer@temple.org', pass: 'viewer123' },
+  { role: 'Donor', email: 'donor@temple.org', pass: 'donor123' },
 ]
 
 const modes: { key: LoginMode; label: string }[] = [
@@ -159,6 +160,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
   const { addUser } = useApp()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<Role>('viewer')
   const [error, setError] = useState('')
@@ -172,10 +174,11 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
     if (!name.trim() || !email.trim() || !password) return setError('Name, email and password are required')
     setSaving(true)
     try {
-      await addUser({ name: name.trim(), email: email.trim(), password, role, status: 'active' })
+      await addUser({ name: name.trim(), email: email.trim(), phone: phone.trim() || undefined, password, role, status: 'active' })
       setOk('User created. They can now sign in with the password you set.')
       setName('')
       setEmail('')
+      setPhone('')
       setPassword('')
       setRole('viewer')
     } catch (err) {
@@ -191,13 +194,19 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
       {ok && <div className="text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">{ok}</div>}
       <Field label="Full Name" required><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ravi Sharma" required /></Field>
       <Field label="Email" required><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@temple.org" required /></Field>
-      <Field label="Password" required hint="Share this password with the user"><Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Set a password" required /></Field>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Mobile Number" hint="Donor portal matches donations by mobile first, then email">
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 9845012345" />
+        </Field>
+        <Field label="Password" required hint="Share this password with the user"><Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Set a password" required /></Field>
+      </div>
       <Field label="Role">
         <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
           <option value="admin">Admin</option>
           <option value="accountant">Accountant</option>
           <option value="manager">Manager</option>
           <option value="viewer">Viewer</option>
+          <option value="donor">Donor (own donations only)</option>
         </Select>
       </Field>
       <div className="flex justify-end gap-2 pt-2">

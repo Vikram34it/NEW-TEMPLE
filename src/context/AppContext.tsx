@@ -227,6 +227,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function refreshAll(): Promise<void> {
+    const isDonor = user?.role === 'donor'
+    const me = isDonor ? user.email : undefined
+    const mob = isDonor ? user.phone : undefined
+
+    if (isDonor) {
+      // Donors load only their own donations (matched by mobile or email) plus
+      // public settings. They never receive staff financials in the client.
+      const [d, s] = await Promise.all([
+        dataService.getDonations(me, mob),
+        dataService.getSettings(),
+      ])
+      setDonations(d)
+      setSettings(s)
+      setUsers([])
+      setPeople([])
+      setExpenses([])
+      setVendors([])
+      setProjects([])
+      setPendingPayments([])
+      setAccounts([])
+      setTransactions([])
+      setAnnouncements([])
+      setEvents([])
+      setEventVolunteers([])
+      setRequests([])
+      setCommunications([])
+      setMessages([])
+      setDashboard(null)
+      return
+    }
+
     const [u, p, d, e, v, pr, pp, ac, t, s, ann, ev, vols, req, comm] = await Promise.all([
       dataService.getUsers(),
       dataService.getPeople(),
@@ -376,6 +407,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       accountant: ['donations:write', 'expenses:write', 'transactions:read', 'reports:read', 'people:read', 'vendors:read', 'projects:read', 'accounts:read', 'receipts:write'],
       manager: ['projects:read', 'people:read', 'people:write', 'vendors:read', 'vendors:write', 'reports:read', 'dashboard:read'],
       viewer: ['dashboard:read', 'reports:read'],
+      donor: ['donor:portal'],
     }
     const allowed = perms[role] || []
     return allowed.includes('*') || allowed.includes(permission)

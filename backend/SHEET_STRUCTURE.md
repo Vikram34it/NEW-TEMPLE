@@ -4,11 +4,17 @@ This app uses a single Google Spreadsheet with 11 sheets. Create each sheet and
 put these exact headers in row 1 (the API reads and writes by these column names).
 
 ## 1. Users
-| UserID | Name | Email | Role | Status | CreatedDate | Password |
-|--------|------|-------|------|--------|-------------|----------|
-| USR-1 | Temple Administrator | admin@temple.org | admin | active | 2025-11-01 | admin123 |
+| UserID | Name | Email | Role | Status | CreatedDate | Password | Phone |
+|--------|------|-------|------|--------|-------------|----------|-------|
+| USR-1 | Temple Administrator | admin@temple.org | admin | active | 2025-11-01 | admin123 | |
 
-Roles: `admin`, `accountant`, `manager`, `viewer`. Status: `active` / `inactive`.
+Roles: `admin`, `accountant`, `manager`, `viewer`, `donor`. Status: `active` / `inactive`.
+
+> A `donor` role signs in through the donor portal and can only view their own
+> donations. Their donations are matched by **mobile number first** (the `Phone`
+> column on the user record against the donation's `Phone`), then by **email**
+> as a fallback. Set the donor's `Phone` when creating their account so mobile
+> matching works.
 
 > Note: In production you should change the demo passwords and ideally handle
 > authentication differently (see SECURITY in Code.gs).

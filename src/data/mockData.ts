@@ -31,6 +31,7 @@ const baseDonations: Donation[] = [
   { donationID: 'DON-2026-0008', date: '2026-06-03', donorID: 'PER-0007', donorName: 'Lakshmi Narasimha', phone: '9638527410', email: 'ln@example.com', address: '4 Lake Road, Chennai', amount: 120000, category: 'Seva', purpose: 'Sponsor devotee seva', paymentMethod: 'Bank Transfer', transactionReference: 'IMPS-778899', receivedBy: 'Accountant', receiptNumber: 'REC-2026-0008', notes: '' },
   { donationID: 'DON-2026-0009', date: '2026-07-14', donorID: 'PER-0008', donorName: 'Sita Devi', phone: '9876543210', email: 'sita@example.com', address: '15 Lotus Lane, Bengaluru', amount: 10000, category: 'General Donation', purpose: 'General offering', paymentMethod: 'Cash', transactionReference: '', receivedBy: 'Admin', receiptNumber: 'REC-2026-0009', notes: '' },
   { donationID: 'DON-2026-0010', date: '2026-08-19', donorID: 'PER-0003', donorName: 'Gopal Charan Das', phone: '9012345678', email: 'gopal@example.com', address: '3 Temple Street, Hubli', amount: 40000, category: 'Temple Construction', purpose: 'Cement purchase fund', paymentMethod: 'UPI', transactionReference: 'UPI-223344', receivedBy: 'Accountant', receiptNumber: 'REC-2026-0010', notes: '' },
+  { donationID: 'DON-2026-0011', date: '2026-08-25', donorID: 'PER-0001', donorName: 'Radha Krishna Das', phone: '9845012345', email: 'donor@temple.org', address: '12 Main Road, Bengaluru', amount: 25000, category: 'General Donation', purpose: 'Monthly offering', paymentMethod: 'UPI', transactionReference: 'UPI-220011', receivedBy: 'Admin', receiptNumber: 'REC-2026-0011', notes: '', createdAt: '2026-08-25T10:00:00Z' },
 ]
 
 const baseExpenses: Expense[] = [
@@ -126,6 +127,7 @@ const baseUsers: User[] = [
   { userID: 'USR-0002', name: 'Chief Accountant', email: 'accountant@temple.org', role: 'accountant', status: 'active', createdDate: '2025-11-01', password: 'accountant123' },
   { userID: 'USR-0003', name: 'Projects Manager', email: 'manager@temple.org', role: 'manager', status: 'active', createdDate: '2025-11-01', password: 'manager123' },
   { userID: 'USR-0004', name: 'Committee Viewer', email: 'viewer@temple.org', role: 'viewer', status: 'active', createdDate: '2025-11-01', password: 'viewer123' },
+  { userID: 'USR-0005', name: 'Donor Radha Krishna', email: 'donor@temple.org', role: 'donor', status: 'active', createdDate: '2026-01-01', password: 'donor123', phone: '9845012345' },
 ]
 
 const baseAnnouncements: Announcement[] = [

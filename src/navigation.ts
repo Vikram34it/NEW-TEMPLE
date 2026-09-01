@@ -8,6 +8,10 @@ export interface NavItem {
 
 export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
+    title: 'My Account',
+    items: [{ path: '/my-donations', label: 'My Donations', roles: ['donor'] }],
+  },
+  {
     title: 'Overview',
     items: [{ path: '/', label: 'Dashboard', roles: ['admin', 'accountant', 'manager', 'viewer'] }],
   },

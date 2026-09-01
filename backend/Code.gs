@@ -227,7 +227,7 @@ function generateApiKey_(len) {
  * ========================================================================== */
 
 var HEADERS = {
-  users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password'],
+  users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password', 'Phone'],
   people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes', 'Birthday', 'Anniversary', 'PreferredChannel', 'PANNumber', 'AadhaarNumber'],
   donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted'],
   expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted'],
@@ -318,7 +318,7 @@ function route_(action, params, body, method) {
     // --- Reads ---
     case 'getUsers': return readAll_(CONFIG.sheetNames.users, HEADERS.users);
     case 'getPeople': return readAll_(CONFIG.sheetNames.people, HEADERS.people);
-    case 'getDonations': return readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+    case 'getDonations': return readDonations_(params.me || (body && body.me), params.mob || (body && body.mob));
     case 'getExpenses': return readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
     case 'getVendors': return readAll_(CONFIG.sheetNames.vendors, HEADERS.vendors);
     case 'getProjects': return readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
@@ -338,7 +338,7 @@ function route_(action, params, body, method) {
     // --- Aliases: the frontend sends the bare lowercase record name for reads.
     case 'users': return readAll_(CONFIG.sheetNames.users, HEADERS.users);
     case 'people': return readAll_(CONFIG.sheetNames.people, HEADERS.people);
-    case 'donations': return readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+    case 'donations': return readDonations_(params.me || (body && body.me), params.mob || (body && body.mob));
     case 'expenses': return readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
     case 'vendors': return readAll_(CONFIG.sheetNames.vendors, HEADERS.vendors);
     case 'projects': return readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
@@ -938,6 +938,35 @@ function readAll_(sheetName, headers) {
   return rows;
 }
 
+// When a donor portal is active, the frontend sends 'me' (the donor's email) and
+// 'mob' (the donor's mobile) so a donor login only ever receives their own
+// donations. Staff logins read all.
+//
+// Matching priority: mobile number first (it is usually recorded and unique),
+// then email as a fallback. A donation is returned if EITHER matches.
+function readDonations_(meEmail, mobPhone) {
+  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var meNorm = meEmail ? String(meEmail).toLowerCase() : '';
+  var mobNorm = mobPhone ? normalizePhone_(mobPhone) : '';
+  if (!meNorm && !mobNorm) return donations;
+  return donations.filter(function (d) {
+    if (meNorm && String(d.Email || '').toLowerCase() === meNorm) return true;
+    if (mobNorm) {
+      var dPhone = String(d.Phone || '');
+      if (dPhone && normalizePhone_(dPhone) === mobNorm) return true;
+    }
+    return false;
+  });
+}
+
+/* Keep only the digits of a phone/mobile number, dropping +91 / 0 prefixes. */
+function normalizePhone_(p) {
+  var digits = String(p || '').replace(/\D/g, '');
+  if (digits.length > 10 && digits.substring(0, 2) === '91') digits = digits.substring(2);
+  if (digits.length > 10 && digits.charAt(0) === '0') digits = digits.substring(1);
+  return digits;
+}
+
 function nextIdFor_(sheetName, idColumnName, prefix) {
   var data = tableData_(sheetName, HEADERS[mapIdToHeaders_(sheetName)]);
   var max = 0;
@@ -1161,6 +1190,7 @@ function login_(body) {
       var safe = {
         userID: u.UserID, name: u.Name, email: u.Email,
         role: u.Role, status: u.Status, createdDate: u.CreatedDate,
+        phone: u.Phone || '',
       };
       audit_('auth', 'Login', u.UserID, '', '');
       return { user: safe, token: '' }; // token auth handled by API_KEY
@@ -1642,4 +1672,5 @@ function ensureDefaultUsers_(ss) {
   sh.appendRow(['USR-0002', 'Chief Accountant', 'accountant@temple.org', 'accountant', 'active', '2025-11-01', 'accountant123']);
   sh.appendRow(['USR-0003', 'Projects Manager', 'manager@temple.org', 'manager', 'active', '2025-11-01', 'manager123']);
   sh.appendRow(['USR-0004', 'Committee Viewer', 'viewer@temple.org', 'viewer', 'active', '2025-11-01', 'viewer123']);
+  sh.appendRow(['USR-0005', 'Donor Radha Krishna', 'donor@temple.org', 'donor', 'active', '2026-01-01', 'donor123', '9845012345']);
 }

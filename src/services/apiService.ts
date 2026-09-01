@@ -289,9 +289,9 @@ export function reconcileMockLedger() {
 }
 
 export const api = {
-  async load(record: RecordName): Promise<unknown> {
+  async load(record: RecordName, params: Record<string, string> = {}): Promise<unknown> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      const data = (await apiFetch(record)) as unknown[]
+      const data = (await apiFetch(record, params)) as unknown[]
       return Array.isArray(data) ? data.map((r) => toCamel(r as Record<string, unknown>)) : data
     }
     return mockStore.data[record]
@@ -414,8 +414,8 @@ export const dataService = {
   async getPeople(): Promise<Person[]> {
     return (await api.load('people')) as Person[]
   },
-  async getDonations(): Promise<Donation[]> {
-    const all = (await api.load('donations')) as Donation[]
+  async getDonations(me?: string, mob?: string): Promise<Donation[]> {
+    const all = (await api.load('donations', me || mob ? { me: me || '', mob: mob || '' } : {})) as Donation[]
     return all.filter((d) => !d.deleted)
   },
   async getExpenses(): Promise<Expense[]> {
