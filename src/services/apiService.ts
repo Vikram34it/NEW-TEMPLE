@@ -1,6 +1,6 @@
 import { CONFIG } from '../config/apiConfig'
 import { buildDashboardData, mockData } from '../data/mockData'
-import { accountNameForPaymentMethod } from '../utils/helpers'
+import { accountNameForPaymentMethod, normalizePhone } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -624,14 +624,18 @@ export const dataService = {
     else item.deletedByRecipient = true
   },
 
-  async login(email: string, password: string): Promise<User> {
+  async login(identifier: string, password: string): Promise<User> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      const res = (await apiFetch('login', {}, { email, password })) as { user: User }
+      const res = (await apiFetch('login', {}, { identifier, password })) as { user: User }
       return res.user
     }
     const users = mockStore.data.users as User[]
     const found = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password && u.status === 'active'
+      (u) =>
+        (u.email.toLowerCase() === identifier.toLowerCase() ||
+          (!!u.phone && normalizePhone(u.phone) === normalizePhone(identifier))) &&
+        u.password === password &&
+        u.status === 'active'
     )
     if (!found) throw new Error('Invalid credentials or account disabled')
     return found

@@ -1180,12 +1180,15 @@ function deleteMessage_(id, email, side) {
  * ========================================================================== */
 
 function login_(body) {
-  var email = (body && body.email || '').toLowerCase();
+  var identifier = String(body && (body.identifier || body.email || body.phone) || '').toLowerCase();
   var password = body && body.password || '';
+  var identDigits = normalizePhone_(identifier);
   var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
   for (var i = 0; i < users.length; i++) {
     var u = users[i];
-    if (String(u.Email).toLowerCase() === email && String(u.Password) === password && u.Status !== 'inactive') {
+    var emailMatch = String(u.Email).toLowerCase() === identifier;
+    var phoneMatch = !!u.Phone && normalizePhone_(u.Phone) === identDigits;
+    if ((emailMatch || phoneMatch) && String(u.Password) === password && u.Status !== 'inactive') {
       // do not return the password to the client
       var safe = {
         userID: u.UserID, name: u.Name, email: u.Email,

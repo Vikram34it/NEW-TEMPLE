@@ -6,19 +6,20 @@ import { CONFIG } from '../config/apiConfig'
 import { Button, Card, Field, Input, Modal, Select } from '../components/ui'
 import type { Role } from '../types'
 
-type LoginMode = 'admin' | 'user'
+type LoginMode = 'admin' | 'user' | 'donor'
 
 const demoAccounts = [
   { role: 'Admin', email: 'admin@temple.org', pass: 'admin123' },
   { role: 'Accountant', email: 'accountant@temple.org', pass: 'accountant123' },
   { role: 'Manager', email: 'manager@temple.org', pass: 'manager123' },
   { role: 'Viewer', email: 'viewer@temple.org', pass: 'viewer123' },
-  { role: 'Donor', email: 'donor@temple.org', pass: 'donor123' },
+  { role: 'Donor', email: 'donor@temple.org', mob: '9845012345', pass: 'donor123' },
 ]
 
 const modes: { key: LoginMode; label: string }[] = [
   { key: 'admin', label: 'Admin Login' },
   { key: 'user', label: 'User Login' },
+  { key: 'donor', label: 'Donor Login' },
 ]
 
 export function LoginPage() {
@@ -48,8 +49,12 @@ export function LoginPage() {
   }
 
   const visibleAccounts = demoAccounts.filter((a) =>
-    mode === 'admin' ? a.role === 'Admin' : a.role !== 'Admin'
+    mode === 'admin' ? a.role === 'Admin'
+    : mode === 'donor' ? a.role === 'Donor'
+    : a.role !== 'Admin' && a.role !== 'Donor'
   )
+
+  const isDonorMode = mode === 'donor'
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
@@ -85,8 +90,19 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Email" required>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@temple.org" required />
+            {isDonorMode && (
+              <p className="text-xs text-slate-500 bg-orange-50 border border-orange-200 rounded-lg p-2.5">
+                Donor? Sign in with the <strong>mobile number</strong> or email registered with the temple to view your donations and receipts.
+              </p>
+            )}
+            <Field label={isDonorMode ? 'Mobile Number or Email' : 'Email'} required>
+              <Input
+                type={isDonorMode ? 'text' : 'email'}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={isDonorMode ? 'Mobile number or email' : 'you@temple.org'}
+                required
+              />
             </Field>
             <Field label="Password" required>
               <div className="relative">
@@ -119,7 +135,7 @@ export function LoginPage() {
             </Button>
           </form>
 
-          {mode === 'user' && (
+          {mode !== 'donor' && (
             <div className="mt-5 pt-4 border-t border-slate-100 text-center">
               <button
                 type="button"
@@ -131,6 +147,11 @@ export function LoginPage() {
               </button>
             </div>
           )}
+          {mode === 'donor' && (
+            <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-slate-400">
+              Don't have an account? Ask the temple admin to create your donor login.
+            </div>
+          )}
         </Card>
 
         {CONFIG.useMockData && visibleAccounts.length > 0 && (
@@ -138,7 +159,7 @@ export function LoginPage() {
             {visibleAccounts.map((a) => (
               <button
                 key={a.role}
-                onClick={() => { setEmail(a.email); setPassword(a.pass) }}
+                onClick={() => { setEmail(isDonorMode && a.mob ? a.mob : a.email); setPassword(a.pass) }}
                 className="text-left text-xs bg-white border border-slate-200 rounded-lg p-2.5 hover:border-orange-400 hover:shadow-sm transition-all"
               >
                 <span className="block font-semibold text-slate-700">{a.role}</span>

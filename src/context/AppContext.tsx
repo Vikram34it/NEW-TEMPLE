@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
+import { normalizePhone } from '../utils/helpers'
 import type {
   Account,
   Announcement,
@@ -76,7 +77,7 @@ function errMsg(e: unknown): string {
 
 interface AppContextValue {
   user: User | null
-  login: (email: string, password: string) => Promise<string | null>
+  login: (identifier: string, password: string) => Promise<string | null>
   logout: () => void
   can: (permission: string) => boolean
 
@@ -364,7 +365,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAuditLog((prev) => [entry, ...prev].slice(0, 500))
   }
 
-  function login(email: string, password: string): Promise<string | null> {
+  function login(identifier: string, password: string): Promise<string | null> {
     return new Promise((resolve) => {
       const finish = (msg: string | null, u: User | null) => {
         if (!msg && u) {
@@ -376,17 +377,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (!CONFIG_USE_LIVE) {
         setTimeout(() => {
-          const found = users.find(
-            (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-          )
+          const found = users.find((u) => {
+            const emailOk = u.email.toLowerCase() === identifier.toLowerCase()
+            const phoneOk = !!u.phone && normalizePhone(u.phone) === normalizePhone(identifier)
+            return (emailOk || phoneOk) && u.password === password
+          })
           if (found && found.status === 'active') {
             finish(null, found)
           } else {
-            finish(found && found.status !== 'active' ? 'Account is disabled' : 'Invalid email or password', null)
+            finish(found && found.status !== 'active' ? 'Account is disabled' : 'Invalid login or password', null)
           }
         }, 400)
       } else {
-        dataService.login(email, password)
+        dataService.login(identifier, password)
           .then((u) => finish(null, u))
           .catch((err) => finish(err instanceof Error ? err.message : 'Login failed', null))
       }
