@@ -12,6 +12,7 @@ import { ProjectsPage } from './pages/ProjectsPage'
 import { PendingPaymentsPage } from './pages/PendingPaymentsPage'
 import { AccountsPage } from './pages/AccountsPage'
 import { TransactionsPage } from './pages/TransactionsPage'
+import { BankStatementPage } from './pages/BankStatementPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/pending-payments" element={<PendingPaymentsPage />} />
             <Route path="/accounts" element={<AccountsPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
+            <Route path="/bank-statement" element={<BankStatementPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/announcements" element={<AnnouncementsPage />} />

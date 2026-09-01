@@ -23,6 +23,7 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { path: '/pending-payments', label: 'Pending Payments', roles: ['admin', 'accountant', 'manager'] },
       { path: '/accounts', label: 'Accounts', roles: ['admin', 'accountant', 'manager'] },
       { path: '/transactions', label: 'Transactions', roles: ['admin', 'accountant'] },
+      { path: '/bank-statement', label: 'Bank Statement', roles: ['admin', 'accountant'] },
     ],
   },
   {

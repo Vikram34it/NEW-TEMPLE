@@ -142,6 +142,7 @@ interface AppContextValue {
   deleteUser: (id: string) => Promise<void>
 
   addTransaction: (t: Omit<Transaction, 'transactionID'>) => Promise<Transaction>
+  bulkAddTransactions: (items: Array<Omit<Transaction, 'transactionID'>>) => Promise<Transaction[]>
 
   addAnnouncement: (a: Omit<Announcement, 'announcementID' | 'postedAt' | 'postedBy'>) => Promise<Announcement>
   updateAnnouncement: (a: Announcement) => Promise<void>
@@ -567,6 +568,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
       await refreshAll()
       if (!isLive) audit('BulkCreate', 'Expenses', `${created.length} records`, `${created.map((c) => c.expenseID).join(', ')}`)
+      return created
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
+    }
+  }
+
+  // ---- Transactions ----
+  async function bulkAddTransactions(items: Array<Omit<Transaction, 'transactionID'>>): Promise<Transaction[]> {
+    const isLive = CONFIG_USE_LIVE
+    const created: Transaction[] = []
+    try {
+      for (const item of items) {
+        if (!isLive) {
+          Object.assign(item, { transactionID: `TXN-2026-${String(nextSeq() + 1).padStart(4, '0')}` } as Partial<Transaction>)
+        }
+        created.push((await dataService.persist('transactions', 'create', { ...item })) as Transaction)
+      }
+      notify('success', `${created.length} transaction${created.length === 1 ? '' : 's'} imported`)
+      await refreshAll()
+      if (!isLive) audit('BulkCreate', 'Transactions', `${created.length} records`)
       return created
     } catch (err) {
       notify('error', errMsg(err))
@@ -1333,6 +1356,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateExpense,
     softDeleteExpense,
     bulkAddExpenses,
+    addTransaction,
+    bulkAddTransactions,
     addPerson,
     updatePerson,
     deletePerson,
@@ -1350,7 +1375,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addUser,
     updateUser,
     deleteUser,
-    addTransaction,
     addAnnouncement,
     updateAnnouncement,
     archiveAnnouncement,
