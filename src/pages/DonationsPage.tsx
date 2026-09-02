@@ -200,7 +200,7 @@ export function DonationsPage() {
       />
 
       <Modal open={!!editDonation} onClose={() => setEditDonation(null)} title="Edit Donation" wide>
-        {editDonation && <DonationForm initial={editDonation} onDone={() => setEditDonation(null)} />}
+        {editDonation && <DonationForm key={editDonation.donationID} initial={editDonation} onDone={() => setEditDonation(null)} />}
       </Modal>
 
       <Modal open={!!viewDonation} onClose={() => setViewDonation(null)} title="Donation Details">

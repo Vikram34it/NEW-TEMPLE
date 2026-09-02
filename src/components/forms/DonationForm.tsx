@@ -56,9 +56,20 @@ interface DonorOption {
   aadhaarNumber?: string
 }
 
+// Initialise the form from an optional existing donation. Dates are forced to
+// yyyy-mm-dd so the <input type="date"> renders it (it blanks any other format,
+// which made editing look like it "forgot" the date).
+function seed(initial?: Partial<DonationLike>): DonationLike {
+  const merged: DonationLike = { ...empty, ...initial }
+  if (merged.date && /^\d{4}-\d{2}-\d{2}$/.test(merged.date) === false) {
+    merged.date = new Date(merged.date).toISOString().slice(0, 10)
+  }
+  return merged
+}
+
 export function DonationForm({ initial, onDone }: Props) {
   const { addDonation, updateDonation, user, people, donations, addPerson } = useApp()
-  const [form, setForm] = useState<DonationLike>({ ...empty, ...initial })
+  const [form, setForm] = useState<DonationLike>(() => seed(initial))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [customCategory, setCustomCategory] = useState(false)
