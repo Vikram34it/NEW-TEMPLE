@@ -63,19 +63,32 @@ async function apiFetch(path: string, params: Record<string, string> = {}, body?
   }
   const qs = new URLSearchParams(params).toString()
   const url = `${CONFIG.webAppUrl}?action=${path}${qs ? `&${qs}` : ''}${TOKEN ? `&token=${TOKEN}` : ''}`
-  const res = await fetch(url, body
-    ? {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }
-    : undefined)
-  if (!res.ok) throw new Error(`API error ${res.status}`)
-  const json = await res.json()
-  if (json.success === false) {
-    throw new Error(json.message || 'API request failed')
+  // Never let a slow or hung backend block the app forever - abort and fail
+  // after REQUEST_TIMEOUT_MS so the UI can render instead of spinning.
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, body
+      ? {
+          method: 'POST',
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        }
+      : { signal: controller.signal })
+    if (!res.ok) throw new Error(`API error ${res.status}`)
+    const json = await res.json()
+    if (json.success === false) {
+      throw new Error(json.message || 'API request failed')
+    }
+    return json.data
+  } finally {
+    window.clearTimeout(timer)
   }
-  return json.data
 }
+
+// Give the Apps Script backend generous time, but cap it so the app always
+// reaches the loaded state even if the backend is down or extremely slow.
+const REQUEST_TIMEOUT_MS = 60000
 
 // The Apps Script backend returns rows keyed by its spreadsheet headers
 // (e.g. "UserID", "DonorName", "CreatedAt"). The React app uses the same

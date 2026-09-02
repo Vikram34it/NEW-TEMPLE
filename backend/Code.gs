@@ -1413,14 +1413,10 @@ function getSettings_() {
  * ========================================================================== */
 
 function buildDashboard_() {
-  // Self-heal: rebuild the ledger + recompute balances before reporting, so
-  // the dashboard always reflects the current recorded money flows even if a
-  // previous request failed mid-write. Never let this break the dashboard.
-  try {
-    resyncLedger_();
-  } catch (e1) {
-    Logger.log('Ledger resync failed: ' + e1);
-  }
+  // The ledger + balances are already resynced inline after every money
+  // mutation (see resyncLedger_()), so a read must NOT trigger the full
+  // Transactions-sheet rebuild here - that made the dashboard (and any page
+  // that awaits it) hang for minutes once the sheet grew.
 
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).filter(notDeleted_);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
@@ -1637,28 +1633,33 @@ function reconcileLedger_() {
     });
   });
 
-  // Deterministic rebuild: clear the sheet's contents and rewrite the header,
-  // the surviving manual rows, and the desired auto rows in canonical order.
-  txSheet.getDataRange().clearContent();
-  txSheet.appendRow(txHeader);
-
-  // Pre-compute the next available TXN ID once instead of calling nextIdFor_()
-  // per row (which re-reads the entire sheet each time — O(N²)).
+  // Deterministic rebuild: collect the header, the surviving manual rows, and
+  // the desired auto rows, then write them ALL in a single setValues() call.
+  // (Per-row appendRow() is O(N) spreadsheet round-trips and made the
+  // dashboard/ledger unbearably slow once the Transactions sheet grew large.)
   var nextTxnNum = 0;
+  var rows = [];
   manual.forEach(function (m) {
     if (!m || !m.TransactionID) return;
-    txSheet.appendRow(txHeader.map(function (h) { return m[h] === undefined ? '' : m[h]; }));
+    rows.push(txHeader.map(function (h) { return m[h] === undefined ? '' : m[h]; }));
     var tm = String(m.TransactionID || '').match(/TXN-(\d+)/);
     if (tm) { var n = parseInt(tm[1], 10); if (n > nextTxnNum) nextTxnNum = n; }
   });
   desired.forEach(function (ent) {
     nextTxnNum += 1;
-    txSheet.appendRow([
+    rows.push([
       'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
       ent.account, ent.referenceID, ent.description, ent.createdBy,
     ]);
   });
+
+  var allRows = [txHeader].concat(rows);
+  txSheet.clear();
+  if (allRows.length > 0) {
+    txSheet.getRange(1, 1, allRows.length, txHeader.length).setValues(allRows);
+  }
+  txSheet.setFrozenRows(1);
 }
 
 /* Write CurrentBalance = OpeningBalance + income - expense per account. */
