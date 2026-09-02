@@ -1419,7 +1419,8 @@ function buildDashboard_() {
   // that awaits it) hang for minutes once the sheet grew.
 
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).filter(notDeleted_);
-  var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
+  var expenseRecords = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
+  var transactions = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
   var payments = readAll_(CONFIG.sheetNames.payments, HEADERS.payments);
   var projects = readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
@@ -1429,9 +1430,26 @@ function buildDashboard_() {
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ];
 
+  // Bank-statement debits are entered as (manual) ledger transactions whose
+  // ReferenceID is a BANK-xxxx tag or the bank's reference - NOT a DON-/EXP-
+  // source id. Include those so the dashboard shows real spending even when
+  // money only went out via an imported statement. Auto-posted rows (their
+  // ReferenceID starts with EXP-) mirror the expense records already included
+  // below, so they are skipped to avoid double counting.
+  var expenseRows = expenseRecords.map(function (e) {
+    return { Amount: e.Amount, Category: e.Category || 'Other', Date: String(e.Date) };
+  }).concat(transactions
+    .filter(function (t) {
+      var ref = String(t.ReferenceID || '').toUpperCase();
+      return String(t.IncomeOrExpense) === 'expense' && ref.indexOf('EXP-') !== 0;
+    })
+    .map(function (t) {
+      return { Amount: t.Amount, Category: 'Other', Date: String(t.Date) };
+    }));
+
   var totalDonations = sumBy_(donations, 'Amount');
-  var totalExpenses = sumBy_(expenses, 'Amount');
-  var totalConstruction = expenses
+  var totalExpenses = sumBy_(expenseRows, 'Amount');
+  var totalConstruction = expenseRows
     .filter(function (e) { return constructionCategories.indexOf(e.Category) >= 0; })
     .reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
 
@@ -1451,7 +1469,7 @@ function buildDashboard_() {
   var now = new Date();
   var thisMonth = now.getFullYear() + '-' + pad2_(now.getMonth() + 1);
   var thisMonthDonations = donations.filter(function (d) { return String(d.Date).indexOf(thisMonth) === 0; }).reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
-  var thisMonthExpenses = expenses.filter(function (e) { return String(e.Date).indexOf(thisMonth) === 0; }).reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
+  var thisMonthExpenses = expenseRows.filter(function (e) { return String(e.Date).indexOf(thisMonth) === 0; }).reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
 
   return {
     totalDonations: totalDonations,
@@ -1463,9 +1481,9 @@ function buildDashboard_() {
     pendingPayments: pendingTotal,
     thisMonthDonations: thisMonthDonations,
     thisMonthExpenses: thisMonthExpenses,
-    monthlyTrend: monthlyTrend_(donations, expenses),
+    monthlyTrend: monthlyTrend_(donations, expenseRows),
     donationsByCategory: groupBySum_(donations, 'Category'),
-    expensesByCategory: groupBySum_(expenses, 'Category'),
+    expensesByCategory: groupBySum_(expenseRows, 'Category'),
     constructionBudgets: projects.map(function (p) {
       return { name: p.ProjectName, budget: toNum_(p.EstimatedBudget), actual: toNum_(p.ActualExpense) };
     }),

@@ -195,18 +195,33 @@ export function buildDashboardData(
   expenses: Expense[],
   accounts: Account[],
   pendingPayments: PendingPayment[],
-  projects: Project[]
+  projects: Project[],
+  transactions: Transaction[]
 ): DashboardData {
   donations = donations.filter((d) => !d.deleted)
   expenses = expenses.filter((e) => !e.deleted)
+
+  // Manual expense transactions (bank-statement debits, direct entries) land
+  // in the ledger with a referenceID that is NOT an EXP- source id. They must
+  // count towards the expense totals so the dashboard shows real spending even
+  // when money went out only via an imported statement. Auto rows (referenceID
+  // EXP-...) mirror the expense records below and are excluded to avoid double
+  // counting.
+  type SpendRow = { date: string; amount: number; category: string }
+  const recordRows: SpendRow[] = expenses.map((e) => ({ date: e.date, amount: e.amount, category: e.category }))
+  const manualTxnRows: SpendRow[] = transactions
+    .filter((t) => t.incomeOrExpense === 'expense' && !/^EXP-/i.test(String(t.referenceID || '')))
+    .map((t) => ({ date: t.date, amount: t.amount, category: 'Other' }))
+  const spendRows = [...recordRows, ...manualTxnRows]
+
   const totalDonations = donations.reduce((s, d) => s + d.amount, 0)
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0)
+  const totalExpenses = spendRows.reduce((s, e) => s + e.amount, 0)
 
   const constructionCategories = [
     'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ]
-  const totalConstructionExpenses = expenses
+  const totalConstructionExpenses = spendRows
     .filter((e) => constructionCategories.includes(e.category))
     .reduce((s, e) => s + e.amount, 0)
 
@@ -230,7 +245,7 @@ export function buildDashboardData(
   const thisMonthDonations = donations
     .filter((d) => d.date.startsWith(thisMonth))
     .reduce((s, d) => s + d.amount, 0)
-  const thisMonthExpenses = expenses
+  const thisMonthExpenses = spendRows
     .filter((e) => e.date.startsWith(thisMonth))
     .reduce((s, e) => s + e.amount, 0)
 
@@ -241,7 +256,7 @@ export function buildDashboardData(
     cur.donations += d.amount
     monthMap.set(m, cur)
   })
-  expenses.forEach((e) => {
+  spendRows.forEach((e) => {
     const m = e.date.slice(0, 7)
     const cur = monthMap.get(m) || { donations: 0, expenses: 0 }
     cur.expenses += e.amount
@@ -260,7 +275,7 @@ export function buildDashboardData(
   const donationsByCategory = [...donCatMap.entries()].map(([name, value]) => ({ name, value }))
 
   const expCatMap = new Map<string, number>()
-  expenses.forEach((e) => expCatMap.set(e.category, (expCatMap.get(e.category) || 0) + e.amount))
+  spendRows.forEach((e) => expCatMap.set(e.category, (expCatMap.get(e.category) || 0) + e.amount))
   const expensesByCategory = [...expCatMap.entries()].map(([name, value]) => ({ name, value }))
 
   const constructionBudgets = projects.map((p) => ({

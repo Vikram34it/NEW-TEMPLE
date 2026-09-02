@@ -393,7 +393,7 @@ export const dataService = {
     }
     const { expenses, accounts, pendingPayments, projects } = mockStore.data
     reconcileMockLedger()
-    return buildDashboardData(mockStore.data.donations, expenses, accounts, pendingPayments, projects)
+    return buildDashboardData(mockStore.data.donations, expenses, accounts, pendingPayments, projects, mockStore.data.transactions as Transaction[])
   },
 
   async getReports(): Promise<unknown> {
