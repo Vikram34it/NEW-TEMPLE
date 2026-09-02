@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`}>
+    <div className={`bg-white rounded-xl border border-slate-200/80 shadow-sm ${className}`}>
       {children}
     </div>
   )
@@ -138,26 +138,53 @@ export function StatCard({ label, value, icon, color = 'orange', sub }: {
   color?: 'orange' | 'green' | 'red' | 'blue' | 'amber' | 'violet' | 'teal'
   sub?: string
 }) {
-  const colors: Record<string, string> = {
-    orange: 'bg-orange-50 text-orange-600',
-    green: 'bg-emerald-50 text-emerald-600',
-    red: 'bg-red-50 text-red-600',
-    blue: 'bg-blue-50 text-blue-600',
-    amber: 'bg-amber-50 text-amber-600',
-    violet: 'bg-violet-50 text-violet-600',
-    teal: 'bg-teal-50 text-teal-600',
+  const colors: Record<string, { badge: string; glow: string }> = {
+    orange: {
+      badge: 'bg-orange-100 text-orange-600 ring-orange-200',
+      glow: 'from-orange-50 to-amber-50 border-orange-100 hover:shadow-orange-100',
+    },
+    green: {
+      badge: 'bg-emerald-100 text-emerald-600 ring-emerald-200',
+      glow: 'from-emerald-50 to-teal-50 border-emerald-100 hover:shadow-emerald-100',
+    },
+    red: {
+      badge: 'bg-red-100 text-red-600 ring-red-200',
+      glow: 'from-red-50 to-rose-50 border-red-100 hover:shadow-red-100',
+    },
+    blue: {
+      badge: 'bg-blue-100 text-blue-600 ring-blue-200',
+      glow: 'from-blue-50 to-indigo-50 border-blue-100 hover:shadow-blue-100',
+    },
+    amber: {
+      badge: 'bg-amber-100 text-amber-600 ring-amber-200',
+      glow: 'from-amber-50 to-orange-50 border-amber-100 hover:shadow-amber-100',
+    },
+    violet: {
+      badge: 'bg-violet-100 text-violet-600 ring-violet-200',
+      glow: 'from-violet-50 to-purple-50 border-violet-100 hover:shadow-violet-100',
+    },
+    teal: {
+      badge: 'bg-teal-100 text-teal-600 ring-teal-200',
+      glow: 'from-teal-50 to-emerald-50 border-teal-100 hover:shadow-teal-100',
+    },
   }
+
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium text-slate-500">{label}</p>
-          <p className="text-2xl font-bold text-slate-800 mt-1">{value}</p>
-          {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+    <div
+      className={`group relative overflow-hidden rounded-xl bg-gradient-to-br border p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${colors[color].glow}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1.5 truncate">{value}</p>
+          {sub && <p className="text-xs text-slate-500 mt-1.5">{sub}</p>}
         </div>
-        <div className={`p-2.5 rounded-lg ${colors[color]}`}>{icon}</div>
+        <div className={`shrink-0 p-2.5 rounded-xl ring-1 transition-transform duration-300 group-hover:scale-110 ${colors[color].badge}`}>
+          {icon}
+        </div>
       </div>
-    </Card>
+      <div className="pointer-events-none absolute -right-6 -bottom-6 h-24 w-24 rounded-full bg-white/40 blur-2xl" />
+    </div>
   )
 }
 

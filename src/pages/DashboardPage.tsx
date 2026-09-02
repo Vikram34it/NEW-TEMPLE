@@ -72,12 +72,12 @@ export function DashboardPage() {
         </Button>
       )}
       {can('people:write') && (
-        <Link to="/people?new=1" className="inline-flex items-center gap-1.5 justify-center px-4 py-2 text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
+        <Link to="/people?new=1" className="inline-flex items-center gap-1.5 justify-center px-4 py-2 text-sm font-medium rounded-lg bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-colors">
           <Plus size={16} /> Add Person
         </Link>
       )}
       {can('vendors:write') && (
-        <Link to="/vendors?new=1" className="inline-flex items-center gap-1.5 justify-center px-4 py-2 text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
+        <Link to="/vendors?new=1" className="inline-flex items-center gap-1.5 justify-center px-4 py-2 text-sm font-medium rounded-lg bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-colors">
           <Plus size={16} /> Add Vendor
         </Link>
       )}
@@ -86,10 +86,12 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      {/* Page header with greeting + temple name */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{settings.templeName}</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-orange-600">{settings.templeName}</p>
+          <h1 className="text-2xl font-bold text-slate-900 mt-1">Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-1">Welcome back — here's the temple's latest position.</p>
         </div>
       </div>
 
@@ -116,6 +118,22 @@ export function DashboardPage() {
         <StatCard label="Assets (Fixed Deposits)" value={formatCurrency(dashboard.totalAssets)} icon={<PiggyBank size={20} />} color="teal" sub="Term deposits held" />
         <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
         <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />
+      </div>
+
+      {/* Net position banner */}
+      <div className="rounded-xl bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500 text-white p-5 sm:p-6 shadow-lg shadow-orange-100 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-orange-100">Net Position</p>
+          <p className="text-3xl sm:text-4xl font-extrabold mt-1">
+            {formatCurrency(dashboard.cashBalance + dashboard.bankBalance + dashboard.totalAssets)}
+          </p>
+          <p className="text-xs text-orange-100 mt-1">Cash + bank + fixed deposits held</p>
+        </div>
+        <div className="grid grid-cols-3 gap-6 sm:gap-10 text-center">
+          <NetStat label="Donations" value={formatCurrency(dashboard.totalDonations)} />
+          <NetStat label="Expenses" value={formatCurrency(dashboard.totalExpenses)} />
+          <NetStat label="Assets" value={formatCurrency(dashboard.totalAssets)} />
+        </div>
       </div>
 
       {/* Community & announcements */}
@@ -210,13 +228,13 @@ export function DashboardPage() {
           <div className="p-4 h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dashboard.monthlyTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v / 1000}k`} />
-                <Tooltip formatter={(v) => formatCurrency(Number(v))} labelFormatter={labelFmt} />
-                <Legend />
-                <Bar dataKey="donations" name="Donations" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expenses" name="Expenses" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v / 1000}k`} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v))} labelFormatter={labelFmt} cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0' }} />
+                <Legend wrapperStyle={{ paddingTop: 8 }} />
+                <Bar dataKey="donations" name="Donations" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={34} />
+                <Bar dataKey="expenses" name="Expenses" fill="#f43f5e" radius={[6, 6, 0, 0]} maxBarSize={34} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -366,14 +384,23 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+function NetStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-lg sm:text-xl font-bold text-white">{value}</p>
+      <p className="text-[11px] uppercase tracking-wider text-orange-100 mt-0.5">{label}</p>
+    </div>
+  )
+}
+
 function DonorCareStat({ label, count, detail, to }: { label: string; count: number; detail: string; to: string }) {
   return (
-    <Link to={to} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-orange-200 hover:bg-orange-50/40 transition-colors">
-      <div className="w-10 h-10 shrink-0 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+    <Link to={to} className="group flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-white hover:border-orange-200 hover:bg-gradient-to-br hover:from-orange-50 hover:to-amber-50 hover:shadow-md transition-all duration-300">
+      <div className="w-10 h-10 shrink-0 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center group-hover:scale-110 transition-transform">
         <Heart size={18} />
       </div>
       <div>
-        <p className="text-lg font-bold text-slate-800 leading-none">{count}</p>
+        <p className="text-lg font-bold text-slate-900 leading-none">{count}</p>
         <p className="text-xs font-medium text-slate-600 mt-1">{label}</p>
         <p className="text-[11px] text-slate-400">{detail}</p>
       </div>
