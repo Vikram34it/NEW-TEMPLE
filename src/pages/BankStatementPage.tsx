@@ -112,24 +112,25 @@ export function BankStatementPage() {
     if (selected.length === 0) return
     setImporting(true)
     try {
-      // Credits with a donor picked become proper donation records (receipts,
-      // donor portal, reports). Everything else becomes a plain ledger entry.
+      // All income rows become proper donation records (receipts, donor
+      // portal, reports). If no known donor is picked for a credit, we tag it
+      // to an "Unknown / walk-in" donor so it still shows in the Donations tab.
+      // Debits remain plain ledger entries.
       const donations: Array<Omit<Donation, 'donationID' | 'receiptNumber'>> = []
       let bankSeq = 1
       const txns: Array<Omit<Transaction, 'transactionID'>> = []
       const donorById = new Map(donors.map((d) => [d.personID, d]))
 
       for (const r of selected) {
-        if (r.type === 'income' && r.donorID) {
-          const donor = donorById.get(r.donorID)
-          if (!donor) continue
+        if (r.type === 'income') {
+          const donor = r.donorID ? donorById.get(r.donorID) : undefined
           donations.push({
             date: r.date,
-            donorID: donor.personID,
-            donorName: donor.name,
-            phone: donor.phone || '',
-            email: donor.email || '',
-            address: donor.address || '',
+            donorID: donor ? donor.personID : '',
+            donorName: donor ? donor.name : 'Unknown Donor',
+            phone: donor?.phone || '',
+            email: donor?.email || '',
+            address: donor?.address || '',
             amount: r.amount,
             category: 'General Donation',
             purpose: '',
@@ -146,7 +147,7 @@ export function BankStatementPage() {
             amount: r.amount,
             account: r.account,
             referenceID: r.reference || `BANK-${String(bankSeq++).padStart(4, '0')}`,
-            description: r.description || `Bank ${r.type === 'income' ? 'credit' : 'debit'}`,
+            description: r.description || 'Bank debit',
             createdBy: user?.name || 'system',
           })
         }

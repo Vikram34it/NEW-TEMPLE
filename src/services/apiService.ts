@@ -428,6 +428,14 @@ export const dataService = {
     return { success: true }
   },
 
+  // Remove ledger rows created by a previous bank-statement import (BANK- refs).
+  async clearBankTransactions(): Promise<{ removed: number }> {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) {
+      return (await apiFetch('clearBankTransactions')) as { removed: number }
+    }
+    return { removed: 0 }
+  },
+
   // Persist settings (backend or mock).
   async saveSettings(settings: Settings): Promise<void> {
     await api.mutate('settings', 'update', settings)

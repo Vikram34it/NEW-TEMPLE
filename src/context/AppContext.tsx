@@ -143,6 +143,7 @@ interface AppContextValue {
 
   addTransaction: (t: Omit<Transaction, 'transactionID'>) => Promise<Transaction>
   bulkAddTransactions: (items: Array<Omit<Transaction, 'transactionID'>>) => Promise<Transaction[]>
+  clearBankTransactions: () => Promise<{ removed: number }>
 
   addAnnouncement: (a: Omit<Announcement, 'announcementID' | 'postedAt' | 'postedBy'>) => Promise<Announcement>
   updateAnnouncement: (a: Announcement) => Promise<void>
@@ -955,6 +956,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function clearBankTransactions(): Promise<{ removed: number }> {
+    try {
+      const result = await dataService.clearBankTransactions()
+      notify('success', result.removed > 0 ? `${result.removed} imported bank rows removed` : 'Nothing to clear')
+      await refreshAll()
+      return result
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
+    }
+  }
+
   async function refreshMessages(): Promise<void> {
     if (!user) return
     try {
@@ -1365,6 +1379,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     bulkAddExpenses,
     addTransaction,
     bulkAddTransactions,
+    clearBankTransactions,
     addPerson,
     updatePerson,
     deletePerson,

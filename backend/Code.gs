@@ -387,6 +387,7 @@ function route_(action, params, body, method) {
 
     case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
     case 'bulkCreateTransactions': return bulkCreateRecords_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.records, 'TXN-', 'transaction', []);
+    case 'clearBankTransactions': return clearBankTransactions_();
     case 'updateSettings': return updateSettings_(body.settings);
     case 'login': return login_(body);
 
@@ -1702,6 +1703,28 @@ function isBalanceSheet_(sheetName) {
 function resyncLedger_() {
   reconcileLedger_();
   recomputeBalances_();
+}
+
+/* Remove ledger entries created by a previous bank-statement import (their
+ * ReferenceID is a BANK-xxxx tag, not a DON-/EXP- source record). This lets an
+ * admin wipe a mistaken import and re-run it cleanly without duplicates. */
+function clearBankTransactions_() {
+  var txSheet = sheet_(CONFIG.sheetNames.transactions);
+  var txHeader = HEADERS.transactions;
+  var txData = tableData_(CONFIG.sheetNames.transactions, txHeader);
+
+  var removed = 0;
+  for (var i = txData.length - 1; i >= 0; i--) {
+    var ref = String(txData[i].ReferenceID || '').toUpperCase();
+    if (/^BANK-/.test(ref)) {
+      // Row i+2 (header is row 1).
+      txSheet.deleteRow(i + 2);
+      removed++;
+    }
+  }
+  if (removed > 0) recomputeBalances_();
+  audit_('transactions', 'ClearBankImports', removed + ' rows', '', 'BANK-* removed');
+  return { success: true, removed: removed };
 }
 
 function pad2_(n) { return n < 10 ? '0' + n : String(n); }

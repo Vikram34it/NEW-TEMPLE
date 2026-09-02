@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Badge, PageHeader, Field, Input, Select, Modal, Button } from '../components/ui'
 import { DataTable } from '../components/DataTable'
@@ -8,7 +8,7 @@ import { formatCurrency, formatDate, todayStr } from '../utils/helpers'
 import type { Transaction } from '../types'
 
 export function TransactionsPage() {
-  const { transactions, accounts, addTransaction, user, can } = useApp()
+  const { transactions, accounts, addTransaction, clearBankTransactions, user, can } = useApp()
   const [typeFilter, setTypeFilter] = useState('')
   const [accountFilter, setAccountFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -59,7 +59,19 @@ export function TransactionsPage() {
         subtitle={`Income: ${formatCurrency(income)} • Expense: ${formatCurrency(expense)} • Net: ${formatCurrency(income - expense)}`}
         action={
           can('*') ? (
-            <Button onClick={() => setShowRecord(true)}><Plus size={16} /> Record Transaction</Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (window.confirm('Remove all rows imported from a bank statement (BANK- references)? This cannot be undone.')) {
+                    void clearBankTransactions()
+                  }
+                }}
+              >
+                <Trash2 size={15} /> Clear bank imports
+              </Button>
+              <Button onClick={() => setShowRecord(true)}><Plus size={16} /> Record Transaction</Button>
+            </div>
           ) : undefined
         }
       />
