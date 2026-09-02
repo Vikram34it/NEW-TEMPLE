@@ -11,6 +11,8 @@ interface PreviewRow extends BankStatementRow {
   include: boolean
   account: string
   donorName: string
+  /** Free-text remark shown for debit (Dr) rows; used as the txn description. */
+  remark: string
 }
 
 // Rough bank-channel detection from the statement narration, mapped onto the
@@ -88,6 +90,7 @@ export function BankStatementPage() {
           include: true,
           account,
           donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
+          remark: '',
         })),
       )
       setAllAccount(account)
@@ -115,6 +118,10 @@ export function BankStatementPage() {
 
   const setDonorName = (key: string, donorName: string) => {
     setRows((rs) => (rs || []).map((r) => (r.key === key ? { ...r, donorName } : r)))
+  }
+
+  const setRemark = (key: string, remark: string) => {
+    setRows((rs) => (rs || []).map((r) => (r.key === key ? { ...r, remark } : r)))
   }
 
   const importRows = async () => {
@@ -161,7 +168,7 @@ export function BankStatementPage() {
             amount: r.amount,
             account: r.account,
             referenceID: r.reference || `BANK-${String(bankSeq++).padStart(4, '0')}`,
-            description: r.description || 'Bank debit',
+            description: (r.remark || '').trim() || r.description || 'Bank debit',
             createdBy: user?.name || 'system',
           })
         }
@@ -277,7 +284,7 @@ export function BankStatementPage() {
                     <th className="text-left py-3 px-2 font-medium">Type</th>
                     <th className="text-right py-3 px-2 font-medium">Amount</th>
                     <th className="text-left py-3 px-2 font-medium">Account</th>
-                    <th className="text-left py-3 px-4 font-medium">Donor name (for credits)</th>
+                    <th className="text-left py-3 px-4 font-medium">Donor name / Remark</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -313,7 +320,12 @@ export function BankStatementPage() {
                             className="!py-1 text-xs"
                           />
                         ) : (
-                          <span className="text-[11px] text-slate-300">—</span>
+                          <Input
+                            value={r.remark}
+                            onChange={(e) => setRemark(r.key, e.target.value)}
+                            placeholder="Remark"
+                            className="!py-1 text-xs"
+                          />
                         )}
                       </td>
                     </tr>
