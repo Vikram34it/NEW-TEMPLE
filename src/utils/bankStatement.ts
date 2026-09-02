@@ -9,6 +9,8 @@ export interface BankStatementRow {
   type: 'income' | 'expense'
   /** Optional donor name supplied by the bank statement's "Donor Name" column. */
   donorName?: string
+  /** Optional free-text remark supplied by the statement's "Remark" column. */
+  remark?: string
 }
 
 // Loaded lazily so the bulky exceljs library (already split into its own chunk
@@ -27,11 +29,12 @@ interface ColumnMap {
   balance?: number
   reference?: number
   donorName?: number
+  remark?: number
 }
 
 type ColumnRole = keyof ColumnMap
 
-const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'description', 'reference', 'direction', 'balance', 'donorName']
+const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'remark', 'description', 'reference', 'direction', 'balance', 'donorName']
 
 function scoreRole(role: ColumnRole, label: string): number {
   const t = String(label || '').trim()
@@ -45,6 +48,8 @@ function scoreRole(role: ColumnRole, label: string): number {
       return /amount debited|debited amount|debit amount|withdrawals/i.test(t) ? 3 : /^debit$/i.test(t) || /^withdrawal/i.test(t) ? 2 : 0
     case 'amount':
       return /^transaction amount/i.test(t) || /^amount\s*(\(|$)/i.test(t) ? 2 : 0
+    case 'remark':
+      return /remark|note\b|comment/i.test(t) ? 3 : 0
     case 'description':
       return /narration|particulars|transaction details|description/i.test(t) ? 3 : /details|remarks|narrative|purpose/i.test(t) ? 2 : 0
     case 'reference':
@@ -199,6 +204,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       if (!description) description = reference
 
       const donorName = map.donorName !== undefined ? cellString(get(map.donorName)).trim() : ''
+      const remark = map.remark !== undefined ? cellString(get(map.remark)).trim() : ''
 
       let amount = 0
       let type: 'income' | 'expense' | null = null
@@ -235,7 +241,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       }
 
       if (type === null || amount <= 0) continue
-      rows.push({ date, description, reference, amount, type, donorName })
+      rows.push({ date, description, reference, amount, type, donorName, remark })
     }
     if (rows.length > 0) return rows
   }

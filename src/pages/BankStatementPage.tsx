@@ -90,7 +90,7 @@ export function BankStatementPage() {
           include: true,
           account,
           donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
-          remark: '',
+          remark: (r.remark || '').trim(),
         })),
       )
       setAllAccount(account)
