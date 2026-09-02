@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Upload, FileSpreadsheet, AlertTriangle, ArrowUpCircle, ArrowDownCircle, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { Badge, Button, Card, EmptyState, PageHeader, Select } from '../components/ui'
+import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '../components/ui'
 import { parseBankStatementXlsx, type BankStatementRow } from '../utils/bankStatement'
 import { formatCurrency, formatDate } from '../utils/helpers'
 import type { Donation, Person, Transaction } from '../types'
@@ -10,7 +10,7 @@ interface PreviewRow extends BankStatementRow {
   key: string
   include: boolean
   account: string
-  donorID: string
+  donorName: string
 }
 
 // Rough bank-channel detection from the statement narration, mapped onto the
@@ -57,7 +57,7 @@ export function BankStatementPage() {
     [rows],
   )
   const donorTaggedCount = useMemo(
-    () => (rows || []).filter((r) => r.include && r.type === 'income' && r.donorID).length,
+    () => (rows || []).filter((r) => r.include && r.type === 'income' && r.donorName?.trim()).length,
     [rows],
   )
   const selectedCount = useMemo(() => (rows || []).filter((r) => r.include).length, [rows])
@@ -79,28 +79,16 @@ export function BankStatementPage() {
         )
       }
       const account = defaultAccount
-      // Auto-tag credits by matching the statement's "Donor Name" column to a
-      // known donor (case/space-insensitive) so they import as proper donation
-      // records with the donor already selected.
-      const normalizeName = (s: string) =>
-        String(s || '')
-          .toLowerCase()
-          .replace(/^["'\s]+|["'\s]+$/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-      const donorIndex = new Map<string, Person>()
-      for (const d of donors) {
-        const key = normalizeName(d.name)
-        if (key && !donorIndex.has(key)) donorIndex.set(key, d)
-      }
+      // The statement's "Donor Name" column (when present) pre-fills the editable
+      // text field so each credit is already tagged; users can correct it freely.
       setRows(
-        parsed.map((r, i) => {
-          let donorID = ''
-          if (r.type === 'income' && r.donorName) {
-            donorID = donorIndex.get(normalizeName(r.donorName))?.personID ?? ''
-          }
-          return { ...r, key: `row-${i}`, include: true, account, donorID }
-        }),
+        parsed.map((r, i) => ({
+          ...r,
+          key: `row-${i}`,
+          include: true,
+          account,
+          donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
+        })),
       )
       setAllAccount(account)
       setFileName(file.name)
@@ -125,8 +113,8 @@ export function BankStatementPage() {
     setRows((rs) => (rs || []).map((r) => ({ ...r, include: checked })))
   }
 
-  const setRowDonor = (key: string, donorID: string) => {
-    setRows((rs) => (rs || []).map((r) => (r.key === key ? { ...r, donorID } : r)))
+  const setDonorName = (key: string, donorName: string) => {
+    setRows((rs) => (rs || []).map((r) => (r.key === key ? { ...r, donorName } : r)))
   }
 
   const importRows = async () => {
@@ -135,21 +123,25 @@ export function BankStatementPage() {
     setImporting(true)
     try {
       // All income rows become proper donation records (receipts, donor
-      // portal, reports). If no known donor is picked for a credit, we tag it
-      // to an "Unknown / walk-in" donor so it still shows in the Donations tab.
+      // portal, reports) using the donor name typed in the preview. If the
+      // name matches a known donor we also link the record (donorID + contact
+      // details); otherwise the typed name is kept and the record is tagged to
+      // an "Unknown / walk-in" donor so it still shows in the Donations tab.
       // Debits remain plain ledger entries.
       const donations: Array<Omit<Donation, 'donationID' | 'receiptNumber'>> = []
       let bankSeq = 1
       const txns: Array<Omit<Transaction, 'transactionID'>> = []
-      const donorById = new Map(donors.map((d) => [d.personID, d]))
+      const normalize = (name: string) => String(name || '').toLowerCase().replace(/\s+/g, ' ').trim()
+      const donorsByName = new Map(donors.map((d) => [normalize(d.name), d]))
 
       for (const r of selected) {
         if (r.type === 'income') {
-          const donor = r.donorID ? donorById.get(r.donorID) : undefined
+          const typedName = (r.donorName || '').trim()
+          const donor = donorsByName.get(normalize(typedName))
           donations.push({
             date: r.date,
             donorID: donor ? donor.personID : '',
-            donorName: donor ? donor.name : 'Unknown Donor',
+            donorName: typedName || (donor ? donor.name : 'Unknown Donor'),
             phone: donor?.phone || '',
             email: donor?.email || '',
             address: donor?.address || '',
@@ -192,7 +184,7 @@ export function BankStatementPage() {
     <div className="space-y-4">
       <PageHeader
         title="Bank Statement Import"
-        subtitle="Upload the bank's Excel statement — every credit becomes an income transaction and every debit an expense. Pick a donor for each credit to record it as a donation."
+        subtitle="Upload the bank's Excel statement — every credit becomes an income transaction and every debit an expense. Type a donor name for each credit to record it as a donation."
       />
 
       {error && (
@@ -224,7 +216,7 @@ export function BankStatementPage() {
               <strong>Description / Narration</strong> column, and either separate <strong>Credit / Debit</strong>{' '}
               columns or a single <strong>Transaction Amount</strong> column with a <strong>Cr/Dr</strong> column.
               A <strong>Transaction ID</strong> column is used as the reference, and a <strong>Donor Name</strong>{' '}
-              column auto-selects the donor for each credit.
+              column pre-fills the donor name box for each credit.
               Title and total rows are skipped automatically.
             </p>
           </label>
@@ -285,7 +277,7 @@ export function BankStatementPage() {
                     <th className="text-left py-3 px-2 font-medium">Type</th>
                     <th className="text-right py-3 px-2 font-medium">Amount</th>
                     <th className="text-left py-3 px-2 font-medium">Account</th>
-                    <th className="text-left py-3 px-4 font-medium">Donor (for credits)</th>
+                    <th className="text-left py-3 px-4 font-medium">Donor name (for credits)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -314,19 +306,12 @@ export function BankStatementPage() {
                       </td>
                       <td className="py-2 px-4">
                         {r.type === 'income' ? (
-                          <div>
-                            <Select value={r.donorID} onChange={(e) => setRowDonor(r.key, e.target.value)} className="!py-1 text-xs">
-                              <option value="">— General income —</option>
-                              {donors.map((d) => (
-                                <option key={d.personID} value={d.personID}>{d.name}</option>
-                              ))}
-                            </Select>
-                            {r.donorName && (
-                              <p className={`mt-0.5 text-[10px] leading-tight ${r.donorID ? 'text-emerald-500' : 'text-amber-500'}`}>
-                                {r.donorID ? '✓ auto-matched' : `Statement name “${r.donorName}” not found`}
-                              </p>
-                            )}
-                          </div>
+                          <Input
+                            value={r.donorName}
+                            onChange={(e) => setDonorName(r.key, e.target.value)}
+                            placeholder="Donor name"
+                            className="!py-1 text-xs"
+                          />
                         ) : (
                           <span className="text-[11px] text-slate-300">—</span>
                         )}
