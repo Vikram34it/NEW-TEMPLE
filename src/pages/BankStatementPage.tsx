@@ -79,7 +79,29 @@ export function BankStatementPage() {
         )
       }
       const account = defaultAccount
-      setRows(parsed.map((r, i) => ({ ...r, key: `row-${i}`, include: true, account, donorID: '' })))
+      // Auto-tag credits by matching the statement's "Donor Name" column to a
+      // known donor (case/space-insensitive) so they import as proper donation
+      // records with the donor already selected.
+      const normalizeName = (s: string) =>
+        String(s || '')
+          .toLowerCase()
+          .replace(/^["'\s]+|["'\s]+$/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      const donorIndex = new Map<string, Person>()
+      for (const d of donors) {
+        const key = normalizeName(d.name)
+        if (key && !donorIndex.has(key)) donorIndex.set(key, d)
+      }
+      setRows(
+        parsed.map((r, i) => {
+          let donorID = ''
+          if (r.type === 'income' && r.donorName) {
+            donorID = donorIndex.get(normalizeName(r.donorName))?.personID ?? ''
+          }
+          return { ...r, key: `row-${i}`, include: true, account, donorID }
+        }),
+      )
       setAllAccount(account)
       setFileName(file.name)
     } catch (err) {
@@ -201,6 +223,8 @@ export function BankStatementPage() {
               Columns are auto-detected — the sheet needs a <strong>Date</strong> column (e.g. Value Date), a{' '}
               <strong>Description / Narration</strong> column, and either separate <strong>Credit / Debit</strong>{' '}
               columns or a single <strong>Transaction Amount</strong> column with a <strong>Cr/Dr</strong> column.
+              A <strong>Transaction ID</strong> column is used as the reference, and a <strong>Donor Name</strong>{' '}
+              column auto-selects the donor for each credit.
               Title and total rows are skipped automatically.
             </p>
           </label>
@@ -290,12 +314,19 @@ export function BankStatementPage() {
                       </td>
                       <td className="py-2 px-4">
                         {r.type === 'income' ? (
-                          <Select value={r.donorID} onChange={(e) => setRowDonor(r.key, e.target.value)} className="!py-1 text-xs">
-                            <option value="">— General income —</option>
-                            {donors.map((d) => (
-                              <option key={d.personID} value={d.personID}>{d.name}</option>
-                            ))}
-                          </Select>
+                          <div>
+                            <Select value={r.donorID} onChange={(e) => setRowDonor(r.key, e.target.value)} className="!py-1 text-xs">
+                              <option value="">— General income —</option>
+                              {donors.map((d) => (
+                                <option key={d.personID} value={d.personID}>{d.name}</option>
+                              ))}
+                            </Select>
+                            {r.donorName && (
+                              <p className={`mt-0.5 text-[10px] leading-tight ${r.donorID ? 'text-emerald-500' : 'text-amber-500'}`}>
+                                {r.donorID ? '✓ auto-matched' : `Statement name “${r.donorName}” not found`}
+                              </p>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-[11px] text-slate-300">—</span>
                         )}

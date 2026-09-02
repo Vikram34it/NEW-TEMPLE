@@ -7,6 +7,8 @@ export interface BankStatementRow {
   reference: string
   amount: number
   type: 'income' | 'expense'
+  /** Optional donor name supplied by the bank statement's "Donor Name" column. */
+  donorName?: string
 }
 
 // Loaded lazily so the bulky exceljs library (already split into its own chunk
@@ -24,11 +26,12 @@ interface ColumnMap {
   direction?: number
   balance?: number
   reference?: number
+  donorName?: number
 }
 
 type ColumnRole = keyof ColumnMap
 
-const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'description', 'reference', 'direction', 'balance']
+const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'description', 'reference', 'direction', 'balance', 'donorName']
 
 function scoreRole(role: ColumnRole, label: string): number {
   const t = String(label || '').trim()
@@ -50,6 +53,8 @@ function scoreRole(role: ColumnRole, label: string): number {
       return /^[cd]r\.?$/i.test(t) || /(?:cr|dr)\s*\/\s*(?:cr|dr)/i.test(t) || /debit\s*\/\s*credit|credit\s*\/\s*debit/i.test(t) ? 2 : 0
     case 'balance':
       return /^balance$/i.test(t) || /closing balance|available balance/i.test(t) ? 2 : 0
+    case 'donorName':
+      return /donor\s*name/i.test(t) ? 3 : 0
     default:
       return 0
   }
@@ -193,6 +198,8 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       const reference = cellString(get(map.reference)).trim()
       if (!description) description = reference
 
+      const donorName = map.donorName !== undefined ? cellString(get(map.donorName)).trim() : ''
+
       let amount = 0
       let type: 'income' | 'expense' | null = null
 
@@ -228,7 +235,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       }
 
       if (type === null || amount <= 0) continue
-      rows.push({ date, description, reference, amount, type })
+      rows.push({ date, description, reference, amount, type, donorName })
     }
     if (rows.length > 0) return rows
   }
