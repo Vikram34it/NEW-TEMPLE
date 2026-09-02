@@ -1,11 +1,16 @@
 import type { Account } from '../types'
 
 export function formatCurrency(amount: number): string {
+  const n = Number(amount) || 0
+  // Show paise only when the amount actually has a fractional part (e.g.
+  // bank-statement amounts like 500000.78); whole rupees stay clean.
+  const hasPaise = Math.round(Math.abs(n * 100)) % 100 !== 0
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount || 0)
+    minimumFractionDigits: hasPaise ? 2 : 0,
+    maximumFractionDigits: hasPaise ? 2 : 0,
+  }).format(n)
 }
 
 export function formatNumber(amount: number): string {
