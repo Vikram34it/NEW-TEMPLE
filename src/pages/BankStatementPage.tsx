@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '../components/ui'
 import { parseBankStatementXlsx, type BankStatementRow } from '../utils/bankStatement'
 import { formatCurrency, formatDate } from '../utils/helpers'
-import type { Donation, Person, Transaction } from '../types'
+import type { Donation, Expense, Person } from '../types'
 
 interface PreviewRow extends BankStatementRow {
   key: string
@@ -27,7 +27,7 @@ function paymentMethodFromDescription(description: string): Donation['paymentMet
 }
 
 export function BankStatementPage() {
-  const { accounts, people, bulkAddDonations, bulkAddTransactions, user, can } = useApp()
+  const { accounts, people, bulkAddDonations, bulkAddExpenses, user, can } = useApp()
   const fileRef = useRef<HTMLInputElement>(null)
   const [rows, setRows] = useState<PreviewRow[] | null>(null)
   const [fileName, setFileName] = useState('')
@@ -134,12 +134,20 @@ export function BankStatementPage() {
       // name matches a known donor we also link the record (donorID + contact
       // details); otherwise the typed name is kept and the record is tagged to
       // an "Unknown / walk-in" donor so it still shows in the Donations tab.
-      // Debits remain plain ledger entries.
+      // Debit rows become expense records too, so they count towards the
+      // dashboard "Total Expenses" and show up in the Expenses page. The
+      // selected account drives the payment method (Cash rows post as cash,
+      // everything else is derived from the narration).
       const donations: Array<Omit<Donation, 'donationID' | 'receiptNumber'>> = []
-      let bankSeq = 1
-      const txns: Array<Omit<Transaction, 'transactionID'>> = []
+      const expenses: Array<Omit<Expense, 'expenseID'>> = []
       const normalize = (name: string) => String(name || '').toLowerCase().replace(/\s+/g, ' ').trim()
       const donorsByName = new Map(donors.map((d) => [normalize(d.name), d]))
+
+      const paymentMethodFor = (r: PreviewRow): Expense['paymentMethod'] => {
+        const acct = accounts.find((a) => a.accountName === r.account)
+        if (acct?.type === 'cash') return 'Cash'
+        return paymentMethodFromDescription(r.description)
+      }
 
       for (const r of selected) {
         if (r.type === 'income') {
@@ -161,21 +169,27 @@ export function BankStatementPage() {
             notes: '',
           })
         } else {
-          txns.push({
+          expenses.push({
             date: r.date,
-            type: r.type,
-            incomeOrExpense: r.type,
-            amount: r.amount,
-            account: r.account,
-            referenceID: r.reference || `BANK-${String(bankSeq++).padStart(4, '0')}`,
+            category: 'Other',
             description: (r.remark || '').trim() || r.description || 'Bank debit',
-            createdBy: user?.name || 'system',
+            amount: r.amount,
+            paymentMethod: paymentMethodFor(r),
+            vendorID: '',
+            vendorName: '',
+            billNumber: '',
+            transactionReference: r.reference || '',
+            projectID: '',
+            projectName: '',
+            approvedBy: user?.name || '',
+            paidBy: user?.name || '',
+            notes: '',
           })
         }
       }
 
       if (donations.length > 0) await bulkAddDonations(donations)
-      if (txns.length > 0) await bulkAddTransactions(txns)
+      if (expenses.length > 0) await bulkAddExpenses(expenses)
       setRows(null)
       setFileName('')
     } catch {
@@ -339,7 +353,7 @@ export function BankStatementPage() {
             <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-100">
               <p className="text-xs text-slate-500 flex items-center gap-1.5">
                 <CheckCircle2 size={14} className="text-emerald-500" />
-                Preview only — nothing is saved until you click Import. Donor-tagged credits are recorded as donations; the rest as transactions.
+                Preview only — nothing is saved until you click Import. Donor-tagged credits are recorded as donations; debit rows as expenses (posted to the account chosen above).
               </p>
               <Button variant="ghost" size="sm" onClick={() => { setRows(null); setFileName(''); setError('') }}>
                 Start over
