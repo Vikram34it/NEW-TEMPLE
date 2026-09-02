@@ -12,6 +12,7 @@ import {
   Plus,
   Pin,
   Heart,
+  PiggyBank,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -112,6 +113,7 @@ export function DashboardPage() {
           sub={`Spent: ${formatCurrency(dashboard.totalConstructionExpenses)} • Balance: ${formatCurrency(dashboard.constructionDonations - dashboard.totalConstructionExpenses)}`}
         />
         <StatCard label="Pending Payments" value={formatCurrency(dashboard.pendingPayments)} icon={<Clock size={20} />} color="violet" />
+        <StatCard label="Assets (Fixed Deposits)" value={formatCurrency(dashboard.totalAssets)} icon={<PiggyBank size={20} />} color="teal" sub="Term deposits held" />
         <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
         <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />
       </div>

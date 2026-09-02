@@ -1430,22 +1430,38 @@ function buildDashboard_() {
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ];
 
+  // Fixed-deposit narrations contain "FD" / "fixed deposit" - these are
+  // assets held by the temple, not spends, so they get their own card and are
+  // excluded from the expense totals.
+  function isFixedDeposit_(t) {
+    var hint = (String(t.Description || '') + ' ' + String(t.Remark || '')).toLowerCase();
+    return /\bfd\b|fixed\s*deposit/.test(hint);
+  }
+
   // Bank-statement debits are entered as (manual) ledger transactions whose
   // ReferenceID is a BANK-xxxx tag or the bank's reference - NOT a DON-/EXP-
   // source id. Include those so the dashboard shows real spending even when
   // money only went out via an imported statement. Auto-posted rows (their
   // ReferenceID starts with EXP-) mirror the expense records already included
   // below, so they are skipped to avoid double counting.
-  var expenseRows = expenseRecords.map(function (e) {
-    return { Amount: e.Amount, Category: e.Category || 'Other', Date: String(e.Date) };
-  }).concat(transactions
+  var ledgerSpends = transactions
     .filter(function (t) {
       var ref = String(t.ReferenceID || '').toUpperCase();
       return String(t.IncomeOrExpense) === 'expense' && ref.indexOf('EXP-') !== 0;
-    })
-    .map(function (t) {
-      return { Amount: t.Amount, Category: 'Other', Date: String(t.Date) };
-    }));
+    });
+
+  var assetRows = expenseRecords
+    .filter(function (e) { return String(e.Category || '') === 'Fixed Deposit'; })
+    .concat(ledgerSpends.filter(isFixedDeposit_))
+    .map(function (e) { return { Amount: e.Amount, Category: 'Fixed Deposit', Date: String(e.Date) }; });
+  var totalAssets = sumBy_(assetRows, 'Amount');
+
+  var expenseRows = expenseRecords
+    .filter(function (e) { return String(e.Category || 'Other') !== 'Fixed Deposit'; })
+    .map(function (e) { return { Amount: e.Amount, Category: e.Category || 'Other', Date: String(e.Date) }; })
+    .concat(ledgerSpends
+      .filter(function (t) { return !isFixedDeposit_(t); })
+      .map(function (t) { return { Amount: t.Amount, Category: 'Other', Date: String(t.Date) }; }));
 
   var totalDonations = sumBy_(donations, 'Amount');
   var totalExpenses = sumBy_(expenseRows, 'Amount');
@@ -1474,6 +1490,7 @@ function buildDashboard_() {
   return {
     totalDonations: totalDonations,
     totalExpenses: totalExpenses,
+    totalAssets: totalAssets,
     totalConstructionExpenses: totalConstruction,
     constructionDonations: constructionDonations,
     cashBalance: cash ? toNum_(cash.CurrentBalance) : 0,

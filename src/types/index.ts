@@ -183,6 +183,7 @@ export interface Settings {
 export interface DashboardData {
   totalDonations: number
   totalExpenses: number
+  totalAssets: number
   totalConstructionExpenses: number
   constructionDonations: number
   cashBalance: number

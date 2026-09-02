@@ -135,7 +135,7 @@ export function StatCard({ label, value, icon, color = 'orange', sub }: {
   label: string
   value: string
   icon: ReactNode
-  color?: 'orange' | 'green' | 'red' | 'blue' | 'amber' | 'violet'
+  color?: 'orange' | 'green' | 'red' | 'blue' | 'amber' | 'violet' | 'teal'
   sub?: string
 }) {
   const colors: Record<string, string> = {
@@ -145,6 +145,7 @@ export function StatCard({ label, value, icon, color = 'orange', sub }: {
     blue: 'bg-blue-50 text-blue-600',
     amber: 'bg-amber-50 text-amber-600',
     violet: 'bg-violet-50 text-violet-600',
+    teal: 'bg-teal-50 text-teal-600',
   }
   return (
     <Card className="p-4">

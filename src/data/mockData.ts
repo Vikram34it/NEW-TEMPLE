@@ -206,13 +206,24 @@ export function buildDashboardData(
   // count towards the expense totals so the dashboard shows real spending even
   // when money went out only via an imported statement. Auto rows (referenceID
   // EXP-...) mirror the expense records below and are excluded to avoid double
-  // counting.
+  // counting. Rows whose narration is a fixed deposit ("FD"/"fixed deposit")
+  // are assets, not spends, and are reported on their own card.
   type SpendRow = { date: string; amount: number; category: string }
+  const isFixedDeposit = (s: string) => /\bfd\b|fixed\s*deposit/i.test(String(s || ''))
+
   const recordRows: SpendRow[] = expenses.map((e) => ({ date: e.date, amount: e.amount, category: e.category }))
   const manualTxnRows: SpendRow[] = transactions
     .filter((t) => t.incomeOrExpense === 'expense' && !/^EXP-/i.test(String(t.referenceID || '')))
-    .map((t) => ({ date: t.date, amount: t.amount, category: 'Other' }))
-  const spendRows = [...recordRows, ...manualTxnRows]
+    .map((t) => ({
+      date: t.date,
+      amount: t.amount,
+      category: isFixedDeposit(t.description) ? 'Fixed Deposit' : 'Other',
+    }))
+
+  const assetRows = [...recordRows, ...manualTxnRows].filter((e) => e.category === 'Fixed Deposit')
+  const totalAssets = assetRows.reduce((s, e) => s + e.amount, 0)
+
+  const spendRows = [...recordRows, ...manualTxnRows].filter((e) => e.category !== 'Fixed Deposit')
 
   const totalDonations = donations.reduce((s, d) => s + d.amount, 0)
   const totalExpenses = spendRows.reduce((s, e) => s + e.amount, 0)
@@ -287,6 +298,7 @@ export function buildDashboardData(
   return {
     totalDonations,
     totalExpenses,
+    totalAssets,
     totalConstructionExpenses,
     constructionDonations,
     cashBalance,

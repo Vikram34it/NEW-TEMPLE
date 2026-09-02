@@ -26,6 +26,13 @@ function paymentMethodFromDescription(description: string): Donation['paymentMet
   return 'Other'
 }
 
+// Fixed-deposit narrations contain "FD" or "fixed deposit" — these are
+// assets, not expenses, and get their own dashboard card.
+const FD_REGEX = /\bfd\b|fixed\s*deposit/i
+function isFixedDeposit(description: string, remark: string): boolean {
+  return FD_REGEX.test(description) || FD_REGEX.test(remark)
+}
+
 export function BankStatementPage() {
   const { accounts, people, bulkAddDonations, bulkAddExpenses, user, can } = useApp()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -171,7 +178,7 @@ export function BankStatementPage() {
         } else {
           expenses.push({
             date: r.date,
-            category: 'Other',
+            category: isFixedDeposit(r.description, r.remark) ? 'Fixed Deposit' : 'Other',
             description: (r.remark || '').trim() || r.description || 'Bank debit',
             amount: r.amount,
             paymentMethod: paymentMethodFor(r),
