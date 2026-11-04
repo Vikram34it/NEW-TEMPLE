@@ -94,6 +94,22 @@ generated `API_KEY` in a dialog. Note it down (keep it secret).
 To wipe everything you have entered (transactions, donations, expenses,
 payments) and start the books fresh, you can use a built-in one-click reset:
 
+### Option A — from the temple app (admin only)
+
+1. Sign in as an **admin** and go to **Settings → Users → Danger Zone →
+   Reset All Transactions**.
+2. Open Apps Script once and run **`getResetKeyNow`** to view the *reset
+   password* (a separate secret, auto-generated on first use — it is NOT the
+   API key). Enter it in the dialog's **Reset password** field and click
+   **Preview** to see exactly how many rows will be deleted, per sheet.
+3. Type **RESET** to confirm, then click **Delete everything permanently**.
+
+Both web actions are gated by the reset password on the backend, so a leaked
+API key alone can never wipe the books. The reset is written to the AuditLog
+with your email as the actor.
+
+### Option B — from the Apps Script editor
+
 1. Open the spreadsheet → **Extensions → Apps Script**.
 2. *(Optional, safest first step)* Pick **`resetAllTransactionsPreview`** from the
    function dropdown and hit **Run** — it logs how many rows would be deleted,

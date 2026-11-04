@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { Save, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { Save, Plus, Pencil, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { formatDate } from '../utils/helpers'
 import { dataService } from '../services/apiService'
+import type { ResetPreviewResult } from '../services/apiService'
 import type { Role, User } from '../types'
 
 export function SettingsPage() {
-  const { settings, updateSettings, users, auditLog, deleteUser, can } = useApp()
+  const { settings, updateSettings, users, auditLog, deleteUser, can, user } = useApp()
   const [form, setForm] = useState({ ...settings })
   const [saveMsg, setSaveMsg] = useState('')
   const [saving, setSaving] = useState(false)
@@ -17,6 +18,7 @@ export function SettingsPage() {
   const [repairing, setRepairing] = useState(false)
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
+  const [showReset, setShowReset] = useState(false)
   const [tab, setTab] = useState<'temple' | 'users' | 'audit' | 'messaging'>('temple')
 
   const save = async () => {
@@ -234,6 +236,31 @@ export function SettingsPage() {
       )}
 
       {tab === 'users' && (
+        <>
+        {can('*') && (
+          <Card>
+            <CardHeader
+              title="Danger Zone"
+              subtitle="Irreversible maintenance actions. Admins only."
+            />
+            <div className="p-5 space-y-2">
+              <p className="text-sm text-slate-500">
+                Deletes <strong>all</strong> entered donations, expenses, payments and transactions,
+                resets every account balance to its OpeningBalance and restarts the receipt counter
+                at 0001. Users, people, vendors, projects and accounts are kept. Cannot be undone
+                from the app (spreadsheet Version history is the only recovery).
+              </p>
+              <p className="text-xs text-slate-400">
+                You will need the reset password: in the Apps Script editor, run <span className="font-mono">getResetKeyNow</span> to view it.
+              </p>
+              <div className="pt-1">
+                <Button variant="danger" onClick={() => setShowReset(true)}>
+                  <AlertTriangle size={16} /> Reset All Transactions
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
         <DataTable
           columns={userColumns}
           data={users}
@@ -251,6 +278,7 @@ export function SettingsPage() {
             </div>
           )}
         />
+        </>
       )}
 
       {tab === 'audit' && (
@@ -292,6 +320,10 @@ export function SettingsPage() {
 
       <Modal open={!!editUser} onClose={() => setEditUser(null)} title="Edit User">
         {editUser && <UserForm initial={editUser} onDone={() => setEditUser(null)} />}
+      </Modal>
+
+      <Modal open={showReset} onClose={() => setShowReset(false)} title="Reset All Transactions">
+        <ResetAllForm email={user?.email || ''} onDone={() => setShowReset(false)} />
       </Modal>
     </div>
   )
@@ -366,5 +398,107 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.userID ? 'Save Changes' : 'Add User'}</Button>
       </div>
     </form>
+  )
+}
+
+function ResetAllForm({ email, onDone }: { email: string; onDone: () => void }) {
+  const [resetKey, setResetKey] = useState('')
+  const [preview, setPreview] = useState<ResetPreviewResult | null>(null)
+  const [confirmText, setConfirmText] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const PARAMETERS: Array<[string, string]> = [
+    ['Donations', 'donations'],
+    ['Expenses', 'expenses'],
+    ['Payments', 'payments'],
+    ['Transactions', 'transactions'],
+  ]
+
+  const runPreview = async () => {
+    setBusy(true)
+    setMsg('')
+    setPreview(null)
+    try {
+      const p = await dataService.resetPreview(resetKey.trim())
+      setPreview(p)
+      if (p.total === 0) setMsg('Nothing to delete — the financial sheets are already empty.')
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Preview failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runReset = async () => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const result = await dataService.resetAllTransactions(resetKey.trim(), email)
+      setMsg(`${result.total} rows deleted. Balances rebuilt, receipt counter restarted. Reloading…`)
+      setTimeout(() => window.location.reload(), 1500)
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Reset failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
+        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+        <span>
+          This permanently deletes every donation, expense, payment and transaction you have entered.
+          Only spreadsheet Version history can recover the data afterwards.
+        </span>
+      </div>
+
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Field label="Reset password" hint="Apps Script editor → run getResetKeyNow to view it">
+            <Input
+              type="password"
+              value={resetKey}
+              onChange={(e) => { setResetKey(e.target.value); setPreview(null); setMsg('') }}
+              placeholder="Reset password"
+            />
+          </Field>
+        </div>
+        <Button variant="secondary" onClick={runPreview} disabled={busy || !resetKey.trim()}>
+          {busy && !preview ? 'Checking…' : 'Preview'}
+        </Button>
+      </div>
+
+      {preview && preview.total > 0 && (
+        <div className="rounded-lg border border-slate-200 p-3 space-y-1.5">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Will be deleted</p>
+          <ul className="text-sm text-slate-700 space-y-0.5">
+            {PARAMETERS.map(([label, key]) => (
+              <li key={key} className="flex justify-between">
+                <span>{label}</span>
+                <span className="font-medium">{preview.removed[key] ?? 0} rows</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-semibold">
+            <span>Total</span><span>{preview.total} rows</span>
+          </div>
+          <Field label='Type RESET to confirm'>
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="RESET" />
+          </Field>
+        </div>
+      )}
+
+      {msg && <p className={`text-sm ${msg.includes('deleted') || msg.startsWith('Nothing') ? 'text-emerald-600' : 'text-red-600'}`}>{msg}</p>}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button variant="ghost" onClick={onDone} type="button">Close</Button>
+        {preview && preview.total > 0 && (
+          <Button variant="danger" onClick={runReset} disabled={busy || confirmText.trim().toUpperCase() !== 'RESET'}>
+            {busy ? 'Deleting…' : 'Delete everything permanently'}
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }

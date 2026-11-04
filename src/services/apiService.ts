@@ -53,6 +53,15 @@ type RecordName =
 
 type MutateOp = 'create' | 'update' | 'softDelete' | 'hardDelete' | 'delete'
 
+// Shapes returned by the FULL RESET endpoints (see Code.gs → FULL RESET).
+export interface ResetPreviewResult {
+  removed: Record<string, number>
+  total: number
+}
+export interface ResetRunResult extends ResetPreviewResult {
+  success: boolean
+}
+
 // Optional token sent to the backend (e.g. the API_KEY from Apps Script).
 // Configure it via an environment variable at build time where appropriate.
 const TOKEN = import.meta.env.VITE_API_TOKEN || ''
@@ -447,6 +456,26 @@ export const dataService = {
       return (await apiFetch('clearBankTransactions')) as { removed: number }
     }
     return { removed: 0 }
+  },
+
+  // ---- DANGER ZONE (Settings → admin only) ----
+  // Preview what the full reset would delete. Requires the separate reset
+  // password (Apps Script → run getResetKeyNow), never sent to anyone else.
+  async resetPreview(resetKey: string): Promise<ResetPreviewResult> {
+    if (CONFIG.useMockData || !CONFIG.webAppUrl) {
+      return { removed: { donations: 0, expenses: 0, payments: 0, transactions: 0 }, total: 0 }
+    }
+    return (await apiFetch('resetAllTransactionsPreview', {}, { resetKey })) as ResetPreviewResult
+  },
+
+  // DANGEROUS: wipe ALL entered donations/expenses/payments/transactions,
+  // reset balances to OpeningBalance and restart the receipt counter at 0001.
+  // Gated by the reset password and confirm:'RESET' on the backend.
+  async resetAllTransactions(resetKey: string, userEmail: string): Promise<ResetRunResult> {
+    if (CONFIG.useMockData || !CONFIG.webAppUrl) {
+      return { success: true, removed: { donations: 0, expenses: 0, payments: 0, transactions: 0 }, total: 0 }
+    }
+    return (await apiFetch('resetAllTransactions', {}, { resetKey, confirm: 'RESET', userEmail })) as ResetRunResult
   },
 
   // Persist settings (backend or mock).

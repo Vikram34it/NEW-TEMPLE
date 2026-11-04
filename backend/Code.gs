@@ -207,6 +207,30 @@ function getApiKey_() {
   return key;
 }
 
+/* Auto-generate and return the SEPARATE reset key (stored in Script
+ * Properties). This is deliberately NOT the API key: every web reset call
+ * must also present this key, so a leaked API key alone can never wipe the
+ * books. Used only by the Settings → Danger Zone action in the app. */
+function getResetKey_() {
+  var key = scriptProperties.getProperty('RESET_KEY');
+  if (!key) {
+    key = generateApiKey_(24);
+    scriptProperties.setProperty('RESET_KEY', key);
+  }
+  return key;
+}
+
+/* Run this from the function dropdown to view (or first-generate) the reset
+ * password for the app's "Reset All Transactions" button in Settings. */
+function getResetKeyNow() {
+  var key = getResetKey_();
+  Logger.log('RESET_KEY = ' + key);
+  try {
+    SpreadsheetApp.getUi().alert('Reset Key (keep secret):\n\n' + key);
+  } catch (e) { /* headless: the Logger line above is enough */ }
+  return key;
+}
+
 function generateApiKey_(len) {
   var arr = new Uint8Array(len);
   // Use the crypto API if available.
@@ -388,6 +412,14 @@ function route_(action, params, body, method) {
     case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
     case 'bulkCreateTransactions': return bulkCreateRecords_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.records, 'TXN-', 'transaction', []);
     case 'clearBankTransactions': return clearBankTransactions_();
+
+    // --- Registry maintenance: FULL RESET (DANGEROUS).
+    // Both actions require the separate RESET_KEY on every call; the
+    // destructive one additionally requires confirm:'RESET'. See the
+    // FULL RESET section below.
+    case 'resetAllTransactionsPreview': return resetPreviewWeb_(body);
+    case 'resetAllTransactions': return resetAllWeb_(body);
+
     case 'updateSettings': return updateSettings_(body.settings);
     case 'login': return login_(body);
 
@@ -1804,7 +1836,17 @@ function fixDeletedDonations() {
 }
 
 /* ==========================================================================
- * FULL RESET - DANGEROUS, run ONLY from the Apps Script function dropdown
+ * FULL RESET - DANGEROUS
+ *
+ * Usable two ways:
+ *   1. Apps Script editor: run resetAllTransactions() from the function
+ *      dropdown (asks for confirmation via a spreadsheet dialog).
+ *   2. The web app: Settings → Danger Zone → Reset All Transactions
+ *      (admin-only). The app shows a preview first, requires typing RESET,
+ *      and both web actions must present the SEPARATE reset password
+ *      (Script Property RESET_KEY - run getResetKeyNow to view it). The
+ *      destructive web action additionally sends confirm:'RESET', so a
+ *      leaked API key alone can never wipe the books.
  *
  * `resetAllTransactions()` wipes everything you *entered* and puts the books
  * back to a fresh state:
@@ -1820,10 +1862,7 @@ function fixDeletedDonations() {
  *     now-empty records, so every account returns to its OpeningBalance.
  *   - Writes an AuditLog entry recording exactly how many rows were removed.
  *
- * Deliberately NOT wired into route_() - the web app can never trigger it,
- * so a leaked API key alone cannot wipe the books. You must open Apps
- * Script and run the function by hand. Users/People/Vendors/Projects and
- * Accounts definitions are untouched.
+ * Users/People/Vendors/Projects and Accounts definitions are untouched.
  *
  * Returns { success, removed: {donations: n, ...}, total: n } and logs a
  * per-sheet breakdown in the execution log.
@@ -1883,8 +1922,10 @@ function resetAllTransactions() {
 }
 
 /* The destructive part, kept separate so resetAllTransactions() can do all
- * its safety checks first. Returns the same summary shape. */
-function resetAllTransactionsCore_() {
+ * its safety checks first. `actor` is the email of the admin who triggered
+ * the reset from the web app (optional, for the AuditLog). Returns the same
+ * summary shape. */
+function resetAllTransactionsCore_(actor) {
   var ss = spreadsheet_();
   var removed = {};
   var total = 0;
@@ -1907,7 +1948,8 @@ function resetAllTransactionsCore_() {
   // Rebuild the empty ledger and put every account back at OpeningBalance.
   resyncLedger_();
 
-  audit_('all', 'ResetAllTransactions', total + ' rows', '', JSON.stringify(removed));
+  audit_('all', 'ResetAllTransactions', total + ' rows', '',
+    JSON.stringify({ actor: actor || '', removed: removed }));
 
   Logger.log('=== RESET COMPLETE ===');
   Object.keys(removed).forEach(function (k) {
@@ -1915,6 +1957,30 @@ function resetAllTransactionsCore_() {
   });
   Logger.log('Receipt sequence reset to 1. Account balances recomputed from empty ledger.');
   return { success: true, removed: removed, total: total };
+}
+
+/* ---- Web endpoints (wired into route_) ----
+ * Every call must present the separate RESET_KEY; the destructive call must
+ * additionally send confirm:'RESET'. Throws (→ HTTP 200
+ * {success:false,message}) when the key or confirmation is wrong. */
+
+function requireResetKey_(body) {
+  var expected = getResetKey_();
+  var got = String((body && (body.resetKey || body.resetPassword)) || '');
+  if (!got || got !== expected) throw new Error('Invalid reset password (run getResetKeyNow in Apps Script to view it)');
+}
+
+function resetPreviewWeb_(body) {
+  requireResetKey_(body);
+  return resetAllTransactionsPreview();
+}
+
+function resetAllWeb_(body) {
+  requireResetKey_(body);
+  if (String((body && body.confirm) || '').trim() !== 'RESET') {
+    throw new Error('Type RESET in the confirmation dialog to proceed');
+  }
+  return resetAllTransactionsCore_((body && body.userEmail) || '');
 }
 
 /* Dry-run variant of the full reset: reports what would be deleted without
