@@ -1804,6 +1804,136 @@ function fixDeletedDonations() {
 }
 
 /* ==========================================================================
+ * FULL RESET - DANGEROUS, run ONLY from the Apps Script function dropdown
+ *
+ * `resetAllTransactions()` wipes everything you *entered* and puts the books
+ * back to a fresh state:
+ *
+ *   - Deletes all data rows (headers kept) from Donations, Expenses,
+ *     Payments and Transactions, after confirming via a spreadsheet dialog
+ *     that shows exactly how many rows will be removed (headless execution
+ *     - e.g. a trigger - aborts instead, so a dialog is always required).
+ *   - Resets the receipt counter (Settings.currentSequence) to 1 so the next
+ *     receipt is REC-0001 again. Donation/expense IDs restart at 0001
+ *     automatically because nextIdFor_ picks the max existing ID.
+ *   - Flattens/rebuilds the ledger and recomputes account balances from the
+ *     now-empty records, so every account returns to its OpeningBalance.
+ *   - Writes an AuditLog entry recording exactly how many rows were removed.
+ *
+ * Deliberately NOT wired into route_() - the web app can never trigger it,
+ * so a leaked API key alone cannot wipe the books. You must open Apps
+ * Script and run the function by hand. Users/People/Vendors/Projects and
+ * Accounts definitions are untouched.
+ *
+ * Returns { success, removed: {donations: n, ...}, total: n } and logs a
+ * per-sheet breakdown in the execution log.
+ * ========================================================================== */
+
+var RESET_TABLES_ = [
+  { name: CONFIG.sheetNames.donations,    label: 'donations' },
+  { name: CONFIG.sheetNames.expenses,     label: 'expenses' },
+  { name: CONFIG.sheetNames.payments,     label: 'payments' },
+  { name: CONFIG.sheetNames.transactions, label: 'transactions' },
+];
+
+/* Human-facing entry point: previews the damage and asks for confirmation
+ * (via a spreadsheet dialog) before deleting anything. Choosing "No" (or
+ * running the function headless via a trigger, where no dialog is possible)
+ * aborts the reset. The actual wipe lives in resetAllTransactionsCore_(). */
+function resetAllTransactions() {
+  var ui = (function () {
+    try { return SpreadsheetApp.getUi(); } catch (e) { return null; }
+  })();
+
+  var preview = resetAllTransactionsPreview();
+
+  if (preview.total === 0) {
+    Logger.log('Nothing to delete - Donations, Expenses, Payments and Transactions are already empty.');
+    if (ui) ui.alert('ISKCON Temple reset', 'Nothing to delete - the four data sheets are already empty.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return { success: true, removed: {}, total: 0 };
+  }
+
+  var detail = RESET_TABLES_.map(function (t) {
+    return t.label + ': ' + preview.removed[t.label] + ' rows';
+  }).join(', ');
+  var warning = 'This will permanently delete ALL entered financial records:\n\n'
+    + detail + '\n\n'
+    + 'Account balances will be reset to OpeningBalance and the receipt counter restarts at 0001.\n\n'
+    + 'This cannot be undone from the app (spreadsheet Version history is your only recovery).'
+    + '\n\nDelete everything?';
+
+  // Headless/trigger execution: no dialog is possible, so ABORT (fail-safe).
+  if (!ui) {
+    Logger.log('Reset ABORTED in headless execution, would have deleted: ' + detail);
+    return { success: false, aborted: 'no-ui', removed: {}, total: 0 };
+  }
+
+  var answer = ui.alert('⚠ Delete all entered transactions?', warning, SpreadsheetApp.getUi().ButtonSet.YES_NO);
+  if (answer !== SpreadsheetApp.getUi().Button.YES) {
+    Logger.log('Reset cancelled by user. Nothing was deleted.');
+    return { success: false, aborted: 'user-cancelled', removed: {}, total: 0 };
+  }
+
+  var result = resetAllTransactionsCore_();
+
+  ui.alert('Reset complete', result.total + ' rows deleted.\n\n'
+    + detail + '\n\nBalances recomputed. Receipt counter reset to 0001.', SpreadsheetApp.getUi().ButtonSet.OK);
+
+  return result;
+}
+
+/* The destructive part, kept separate so resetAllTransactions() can do all
+ * its safety checks first. Returns the same summary shape. */
+function resetAllTransactionsCore_() {
+  var ss = spreadsheet_();
+  var removed = {};
+  var total = 0;
+
+  RESET_TABLES_.forEach(function (t) {
+    var sh = ss.getSheetByName(t.name) || sheet_(t.name);
+    var last = sh.getLastRow();
+    if (last > 1) {
+      sh.deleteRows(2, last - 1); // one bulk call per sheet, keeps row 1 headers
+      removed[t.label] = last - 1;
+      total += last - 1;
+    } else {
+      removed[t.label] = 0;
+    }
+  });
+
+  // Reset the receipt counter (REC-2026-xxxx) so it starts over at 0001.
+  updateSettings_({ currentSequence: '1' });
+
+  // Rebuild the empty ledger and put every account back at OpeningBalance.
+  resyncLedger_();
+
+  audit_('all', 'ResetAllTransactions', total + ' rows', '', JSON.stringify(removed));
+
+  Logger.log('=== RESET COMPLETE ===');
+  Object.keys(removed).forEach(function (k) {
+    Logger.log(k + ': ' + removed[k] + ' rows deleted');
+  });
+  Logger.log('Receipt sequence reset to 1. Account balances recomputed from empty ledger.');
+  return { success: true, removed: removed, total: total };
+}
+
+/* Dry-run variant of the full reset: reports what would be deleted without
+ * touching anything. Run this first if you want to preview the damage. */
+function resetAllTransactionsPreview() {
+  var out = { removed: {}, total: 0 };
+  RESET_TABLES_.forEach(function (t) {
+    var n = Math.max(sheet_(t.name).getLastRow() - 1, 0);
+    out.removed[t.label] = n;
+    out.total += n;
+  });
+  Logger.log('=== RESET PREVIEW (nothing was deleted) ===');
+  Object.keys(out.removed).forEach(function (k) {
+    Logger.log(k + ': ' + out.removed[k] + ' rows');
+  });
+  return out;
+}
+
+/* ==========================================================================
  * SETUP HELPER
  *
  * Runs automatically on first open (via onOpen). Creates every sheet with the

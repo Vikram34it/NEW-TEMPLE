@@ -89,6 +89,30 @@ generated `API_KEY` in a dialog. Note it down (keep it secret).
 4. Set `VITE_API_TOKEN` to the `API_KEY` from Step 2.
 5. Rebuild / redeploy.
 
+## Resetting All Entered Transactions
+
+To wipe everything you have entered (transactions, donations, expenses,
+payments) and start the books fresh, you can use a built-in one-click reset:
+
+1. Open the spreadsheet → **Extensions → Apps Script**.
+2. *(Optional, safest first step)* Pick **`resetAllTransactionsPreview`** from the
+   function dropdown and hit **Run** — it logs how many rows would be deleted,
+   per sheet, without deleting anything.
+3. Pick **`resetAllTransactions`** from the function dropdown and hit **Run**.
+
+This deletes all data rows (headers kept) in Donations, Expenses, Payments and
+Transactions, resets the receipt counter so the next receipt is `REC-0001`,
+recomputes every account balance back to its OpeningBalance, and writes an
+AuditLog entry of the reset. A **confirmation dialog** shows the exact row
+counts before anything is deleted — choosing **No** (or cancelling) aborts.
+Users, people, vendors, projects and account definitions are untouched, and
+IDs restart at 0001 automatically.
+
+The reset is deliberately **not** reachable through the web app API — a leaked
+API key can never wipe the books; you must run the function by hand in Apps
+Script. For extra safety, **File → Version history** in the spreadsheet lets you
+restore anything.
+
 ## Deploying to GitHub Pages
 
 Push the repository to GitHub, then create a `gh-pages` branch release, or use
