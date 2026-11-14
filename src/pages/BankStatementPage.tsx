@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Upload, FileSpreadsheet, AlertTriangle, ArrowUpCircle, ArrowDownCircle, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '../components/ui'
-import { parseBankStatement, type BankStatementRow } from '../utils/bankStatement'
+import { parseBankStatement, reconcileStatement, type BankStatementRow } from '../utils/bankStatement'
 import { formatCurrency, formatDate, normalizePhone } from '../utils/helpers'
 import type { Donation, Expense, Person, Transaction } from '../types'
 import { bankPurpose, isBankOnlyCategory } from '../utils/bankPurpose'
@@ -74,6 +74,7 @@ export function BankStatementPage() {
     () => (rows || []).filter((r) => r.include && r.type === 'income' && !isBankOnlyCategory(r.category) && r.donorID).length,
     [rows],
   )
+  const reconciliation = useMemo(() => reconcileStatement(rows || []), [rows])
   const selectedCount = useMemo(() => (rows || []).filter((r) => r.include).length, [rows])
 
   const handleFile = async (file: File | undefined) => {
@@ -234,6 +235,9 @@ export function BankStatementPage() {
     }
   }
 
+  const statementAccount = bankAccounts.find((account) => account.accountID === allAccount)
+  const singleAccount = !!statementAccount && !!rows?.every((row) => row.include && row.account === statementAccount.accountID)
+  const openingDifference = reconciliation && statementAccount ? Math.round((reconciliation.opening - statementAccount.openingBalance) * 100) / 100 : 0
   const search = query.trim().toLowerCase()
   const filteredRows = (rows || []).filter((row) => !search || [row.reference, row.description, row.donorName, row.category, row.purpose, row.remark].some((value) => value?.toLowerCase().includes(search))).filter((r) => filter === 'all' || (filter === 'unlinked' ? r.type === 'income' && !r.donorID && !isBankOnlyCategory(r.category) : filter === 'review' ? r.category.startsWith('Unclassified') : r.type === filter))
   const visibleRows = filteredRows.slice(page * 50, (page + 1) * 50)
@@ -284,6 +288,27 @@ export function BankStatementPage() {
 
       {rows && (
         <>
+          {reconciliation && (
+            <Card className="p-4">
+              <h2 className="font-semibold text-slate-800">Bank statement reconciliation</h2>
+              <dl className="mt-3 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
+                <div><dt>Statement opening</dt><dd className="font-semibold">{formatCurrency(reconciliation.opening)}</dd></div>
+                <div><dt>Statement closing</dt><dd className="font-semibold">{formatCurrency(reconciliation.closing)}</dd></div>
+                {singleAccount && statementAccount && (
+                  <>
+                    <div><dt>Account opening</dt><dd className="font-semibold">{formatCurrency(statementAccount.openingBalance)}</dd></div>
+                    <div><dt>Account opening + statement movement</dt><dd className="font-semibold">{formatCurrency(statementAccount.openingBalance + incomeTotal - expenseTotal)}</dd></div>
+                  </>
+                )}
+              </dl>
+              {singleAccount && openingDifference !== 0 && (
+                <p className="mt-3 text-sm text-amber-800" role="status">
+                  The statement opening differs from the account opening by {formatCurrency(Math.abs(openingDifference))}.
+                  Check for transactions before this statement. If this statement starts your ledger, set the account opening in Accounts to the statement opening.
+                </p>
+              )}
+            </Card>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Card className="p-4">
               <p className="text-xs text-slate-500">Rows</p>

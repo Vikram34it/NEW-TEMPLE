@@ -6,6 +6,7 @@ export interface BankStatementRow {
   reference: string
   bankTransactionID?: string
   amount: number
+  runningBalance?: number
   type: 'income' | 'expense'
   /** Optional donor name supplied by the bank statement's "Donor Name" column. */
   donorName?: string
@@ -241,9 +242,27 @@ function parseWorksheet(cells: unknown[][]): BankStatementRow[] {
       }
 
       if (type === null || !Number.isFinite(amount) || amount <= 0) continue
-      rows.push({ date, description, reference, amount, type, donorName, remark, bankTransactionID: cellString(get(map.transactionID)).trim(), purpose: cellString(get(map.purpose)).trim(), donorPhone: cellString(get(map.donorPhone)).trim() })
+      const rawBalance = parseAmount(get(map.balance))
+      const runningBalance = Number.isFinite(rawBalance) ? rawBalance : undefined
+      rows.push({ runningBalance, date, description, reference, amount, type, donorName, remark, bankTransactionID: cellString(get(map.transactionID)).trim(), purpose: cellString(get(map.purpose)).trim(), donorPhone: cellString(get(map.donorPhone)).trim() })
     }
     if (rows.length > 0) return rows
   }
   return []
+}
+/** Infer the statement opening only when every running balance reconciles. */
+export function reconcileStatement(rows: BankStatementRow[]) {
+  if (!rows.length || rows.some((row) => row.runningBalance === undefined)) return null
+  const signedPaise = (row: BankStatementRow) => Math.round(row.amount * 100) * (row.type === 'income' ? 1 : -1)
+  // Exports can list transactions in either order.
+  for (const ordered of [rows, [...rows].reverse()]) {
+    const first = ordered[0]
+    const opening = Math.round(first.runningBalance! * 100) - signedPaise(first)
+    let balance = opening
+    if (ordered.every((row) => {
+      balance += signedPaise(row)
+      return balance === Math.round(row.runningBalance! * 100)
+    })) return { opening: opening / 100, closing: balance / 100 }
+  }
+  return null
 }
