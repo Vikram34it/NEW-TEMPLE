@@ -309,14 +309,49 @@ function donationsFor_(user) {
     }
     return row;
   });
-  if (user.DonorPersonID) {
-    return readDonations_().filter(function (row) {
-      return String(row.DonorID) === String(user.DonorPersonID);
+  var personID = String(user.DonorPersonID || '').trim();
+  var email = String(user.Email || '').trim();
+  var phone = normalizePhone_(user.Phone);
+  if (!personID && phone) {
+    var people = readAll_(CONFIG.sheetNames.people, HEADERS.people).filter(function (person) {
+      return normalizePhone_(person.Phone) === phone;
+    });
+    if (people.length === 1 && String(people[0].Status).toLowerCase() === 'active' &&
+        /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(people[0].PersonType))) {
+      var candidateID = String(people[0].PersonID || '').trim();
+      var claimed = readAll_(CONFIG.sheetNames.users, HEADERS.users).some(function (account) {
+        return String(account.UserID) !== String(user.UserID) &&
+          (normalizePhone_(account.Phone) === phone || String(account.DonorPersonID || '').trim() === candidateID);
+      });
+      if (!claimed) personID = candidateID;
+    }
+  }
+
+  if (!personID && !email && !phone) return [];
+  var contactMatches = new Set();
+  if (!user.DonorPersonID && (email || phone)) {
+    readDonations_(email, phone, true).forEach(function (row) {
+      contactMatches.add(String(row.DonationID));
     });
   }
-  var email = String(user.Email || '').trim();
-  if (!email && !normalizePhone_(user.Phone)) return [];
-  return readDonations_(email, user.Phone, true);
+
+  // A ledger link can identify an existing receipt whose donor field is blank.
+  // Keep raw bank credits, debits and conflicting receipt links out of the portal.
+  var ledgerOwners = new Map();
+  readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions).forEach(function (row) {
+    var owner = String(row.PersonID || '').trim();
+    var reference = String(row.ReferenceID || '').trim();
+    if (row.IncomeOrExpense !== 'income' || !owner || !reference) return;
+    if (!ledgerOwners.has(reference)) ledgerOwners.set(reference, owner);
+    else if (ledgerOwners.get(reference) !== owner) ledgerOwners.set(reference, '');
+  });
+  return readDonations_().filter(function (row) {
+    var owner = String(row.DonorID || '').trim();
+    if (owner) return !!personID && owner === personID;
+    var receiptID = String(row.DonationID);
+    if (ledgerOwners.has(receiptID)) return !!personID && ledgerOwners.get(receiptID) === personID;
+    return contactMatches.has(receiptID);
+  });
 }
 
 function peopleFor_(user) {

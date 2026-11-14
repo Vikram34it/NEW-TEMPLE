@@ -20,6 +20,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.donor-portal-background {
+  background-image: linear-gradient(rgb(248 250 252 / 94%), rgb(248 250 252 / 94%)), url('./assets/temple-donor.png');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
 /* Custom scrollbar for a clean look */
 ::-webkit-scrollbar {
   width: 8px;
@@ -38,6 +45,10 @@ body {
 
 /* Printable receipt: only the receipt area is visible when printing */
 @media print {
+  .donor-portal-background {
+    background-image: none;
+  }
+
   body * {
     visibility: hidden;
   }

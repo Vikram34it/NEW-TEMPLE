@@ -4,6 +4,7 @@ import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
+import templeImage from '../assets/temple-donor.png'
 import { Button, Card, Field, Input, Modal, Select } from '../components/ui'
 import type { Role } from '../types'
 
@@ -46,7 +47,14 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
   const visibleAccounts = demoAccounts.filter((account) => (account.role === 'Donor') === isDonorMode)
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+    <div className={`min-h-screen flex flex-col items-center justify-center bg-slate-100 p-4 ${isDonorMode ? 'gap-6 lg:flex-row lg:gap-10 lg:p-8' : ''}`}>
+      {isDonorMode && (
+        <img
+          src={templeImage}
+          alt="Architectural rendering of the temple"
+          className="block w-full max-w-md rounded-2xl shadow-sm lg:w-[52%] lg:max-w-3xl"
+        />
+      )}
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <div className="inline-flex w-16 h-16 rounded-2xl bg-orange-600 items-center justify-center text-white mb-3">
