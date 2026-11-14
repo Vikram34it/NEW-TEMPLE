@@ -425,8 +425,12 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
-  getCollections(ownOnly = false): Promise<CollectionEntry[]> {
-    return apiFetch('getCollections', {}, { ownOnly })
+  async getCollections(ownOnly = false): Promise<CollectionEntry[]> {
+    const rows = await apiFetch('getCollections', {}, { ownOnly })
+    if (!Array.isArray(rows) || rows.some((row) => !row || typeof row.id !== 'string' || !row.details)) {
+      throw new Error('The server returned an invalid collections list. Check that the latest Apps Script version is deployed.')
+    }
+    return rows
   },
   findCollectionDonors(query: string): Promise<CollectionDonor[]> {
     return apiFetch('findCollectionDonors', {}, { query })

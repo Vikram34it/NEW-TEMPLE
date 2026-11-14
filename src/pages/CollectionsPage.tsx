@@ -52,7 +52,10 @@ function LiveCollectionsPage() {
     try {
       setRows(await dataService.getCollections(true))
     } catch (err) {
-      setError(errorText(err))
+      const message = errorText(err)
+      setError(message === 'Permission denied'
+        ? 'The server denied access to Collections. Ask your admin to check the Collector role and Apps Script deployment.'
+        : message)
     } finally {
       setLoading(false)
     }
@@ -118,9 +121,19 @@ function LiveCollectionsPage() {
         {filter !== 'all' && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => { setFilter('all'); setShowAll(false) }}>Show all statuses</button>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         {loading && <p role="status" className="text-sm text-slate-500">Loading collections…</p>}
-        {!loading && !filtered.length && !error && <p className="text-sm text-slate-500">
-          {filter === 'all' ? 'No collections submitted yet.' : 'No collections with this status.'}
-        </p>}
+        {!loading && !filtered.length && !error && (
+          <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+            {filter === 'all' ? (
+              <>
+                <p className="font-medium text-slate-800">No collections submitted yet</p>
+                <p className="mt-1">Start by finding or enrolling the donor.</p>
+                {!formOpen && <Button className="mt-3 w-full sm:w-auto" onClick={() => openCollection()}>
+                  <Plus size={18} /> Record your first collection
+                </Button>}
+              </>
+            ) : <p>No collections with this status.</p>}
+          </div>
+        )}
         {filtered.slice(0, showAll ? filtered.length : 5).map((row) => (
           <div key={row.id} className="space-y-1 border-t border-slate-100 pt-3 text-sm">
             <p className="font-medium">{row.details.name} · {summary(row.details)}</p>
