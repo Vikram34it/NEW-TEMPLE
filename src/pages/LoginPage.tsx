@@ -87,7 +87,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
                 required
               />
             </Field>
-            <Field label="Password" required>
+            <Field label={isDonorMode ? 'Password or PIN' : 'Password'} required>
               <div className="relative">
                 <Input
                   type={showPass ? 'text' : 'password'}
@@ -162,7 +162,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
             setEmail(email)
             setPassword('')
             setError('')
-            setActivationNotice('Your account is ready. Sign in with your email and new password.')
+            setActivationNotice('Your account is ready. Sign in with your email and the password or PIN you chose.')
             setShowActivation(false)
           }} />}
         </Modal>
@@ -223,8 +223,8 @@ function DonorActivationForm({ onDone }: { onDone: (email: string) => void }) {
           <Field label="Email code" required>
             <Input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} required />
           </Field>
-          <Field label="New password" hint="Use at least 15 characters." required>
-            <Input type="password" autoComplete="new-password" minLength={15} maxLength={256} value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <Field label="New password or PIN" hint="Choose a 6-digit PIN or a password with at least 8 characters. Use it each time you sign in." required>
+            <Input type="password" autoComplete="new-password" pattern="[0-9]{6}|.{8,256}" title="Enter a 6-digit PIN or a password with at least 8 characters." maxLength={256} value={password} onChange={(e) => setPassword(e.target.value)} required />
           </Field>
           <div className="flex flex-wrap gap-3">
             <Button type="button" variant="ghost" onClick={requestCode} disabled={busy}>Resend code</Button>

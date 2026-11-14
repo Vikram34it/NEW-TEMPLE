@@ -1714,8 +1714,8 @@ function activateDonor_(body) {
   var email = activationEmail_(body.email);
   var code = String(body.code || '').trim();
   var password = body.password;
-  if (typeof password !== 'string' || password.length < 15 || password.length > 256 || isSeedPassword_(password)) {
-    throw new Error('Choose a password between 15 and 256 characters.');
+  if (typeof password !== 'string' || (password.length < 8 && !/^[0-9]{6}$/.test(password)) || password.length > 256 || isSeedPassword_(password)) {
+    throw new Error('Choose a 6-digit PIN or a password between 8 and 256 characters.');
   }
   var cache = CacheService.getScriptCache();
   var key = 'donor-email-otp:' + digest_(email);
