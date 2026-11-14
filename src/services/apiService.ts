@@ -12,6 +12,7 @@ import type {
   Communication,
   DashboardData,
   Donation,
+  InstallmentPlan,
   EventVolunteer,
   Expense,
   Message,
@@ -414,7 +415,27 @@ const MONEY_RECORDS: RecordName[] = ['donations', 'expenses', 'accounts', 'trans
 function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r) }
 
 // Convenience data accessor used by the React app.
+let demoInstallmentPlans: InstallmentPlan[] = []
+
 export const dataService = {
+  async getInstallmentPlans(): Promise<InstallmentPlan[]> {
+    if (CONFIG.useMockData) return demoInstallmentPlans
+    const rows = await apiFetch('getInstallmentPlans') as Record<string, unknown>[]
+    return rows.map((row) => toCamel(row) as unknown as InstallmentPlan)
+  },
+  async createInstallmentPlan(donorID: string, purpose: string, schedule: { due: string; paise: number }[]) {
+    if (!CONFIG.useMockData) return apiFetch('createInstallmentPlan', {}, { donorID, purpose, schedule })
+    demoInstallmentPlans = [...demoInstallmentPlans, { planID: crypto.randomUUID(), donorID, purpose, schedule: JSON.stringify(schedule) }]
+  },
+  async linkInstallmentPayment(planID: string, donationID: string, unlink = false) {
+    if (!CONFIG.useMockData) return apiFetch('linkInstallmentPayment', {}, { planID, donationID, unlink })
+    return api.mutate('donations', 'update', { donationID, installmentPlanID: unlink ? '' : planID })
+  },
+  async recordInstallmentReminder(planID: string) {
+    if (!CONFIG.useMockData) return apiFetch('recordInstallmentReminder', {}, { planID })
+    demoInstallmentPlans = demoInstallmentPlans.map((plan) => plan.planID === planID ? { ...plan, lastReminderAt: new Date().toISOString() } : plan)
+  },
+
   async getDashboard(): Promise<DashboardData> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
       return apiFetch('getDashboardData') as Promise<DashboardData>

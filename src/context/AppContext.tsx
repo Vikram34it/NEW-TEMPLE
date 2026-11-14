@@ -118,7 +118,7 @@ interface AppContextValue {
   setMessagesPolling: (active: boolean) => void
 
   addDonation: (d: Omit<Donation, 'donationID' | 'receiptNumber'>) => Promise<Donation>
-  updateDonation: (d: Donation) => Promise<void>
+  updateDonation: (d: Partial<Donation> & Pick<Donation, 'donationID'>) => Promise<void>
   softDeleteDonation: (id: string) => Promise<void>
   bulkAddDonations: (items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>) => Promise<Donation[]>
 
@@ -470,7 +470,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw err
     }
   }
-  async function updateDonation(d: Donation): Promise<void> {
+  async function updateDonation(d: Partial<Donation> & Pick<Donation, 'donationID'>): Promise<void> {
     const isLive = CONFIG_USE_LIVE
     try {
       await dataService.persist('donations', 'update', d)

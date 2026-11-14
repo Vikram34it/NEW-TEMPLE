@@ -4,6 +4,7 @@ import { AppLayout, RoleGuard } from './layouts/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { MyDonationsPage } from './pages/MyDonationsPage'
+import { InstallmentsPage } from './pages/InstallmentsPage'
 import { DonationsPage } from './pages/DonationsPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { PeoplePage } from './pages/PeoplePage'
@@ -38,6 +39,7 @@ export default function App() {
                 </RoleGuard>
               }
             />
+            <Route path="/installments" element={<RoleGuard roles={['admin', 'accountant']}><InstallmentsPage /></RoleGuard>} />
             <Route path="/donations" element={<DonationsPage />} />
             <Route path="/expenses" element={<ExpensesPage />} />
             <Route path="/people" element={<PeoplePage />} />

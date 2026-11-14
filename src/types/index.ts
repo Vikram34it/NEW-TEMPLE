@@ -42,7 +42,16 @@ export interface Communication {
   status: string
 }
 
+export interface InstallmentPlan {
+  planID: string
+  donorID: string
+  purpose: string
+  schedule: string
+  lastReminderAt?: string
+}
+
 export interface Donation {
+  installmentPlanID?: string
   accountID?: string
   bankImportKey?: string
   donationID: string

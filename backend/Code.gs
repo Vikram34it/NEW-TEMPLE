@@ -19,6 +19,7 @@ var CONFIG = {
     requests: 'Requests',
     communication: 'Communication',
     campaigns: 'Campaigns',
+    installmentPlans: 'InstallmentPlans',
   },
 };
 
@@ -170,7 +171,7 @@ function randomToken_() {
 var HEADERS = {
   users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password', 'Phone'],
   people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes', 'Birthday', 'Anniversary', 'PreferredChannel', 'PANNumber', 'AadhaarNumber'],
-  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey'],
+  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey', 'InstallmentPlanID'],
   expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey'],
   vendors: ['VendorID', 'CompanyName', 'ContactPerson', 'Phone', 'Email', 'Address', 'ServiceType', 'GSTNumber', 'BankDetails', 'Notes'],
   projects: ['ProjectID', 'ProjectName', 'Description', 'StartDate', 'EstimatedBudget', 'ActualExpense', 'Status', 'Contractor'],
@@ -184,6 +185,7 @@ var HEADERS = {
   eventVolunteers: ['VolunteerID', 'EventID', 'PersonID', 'Name', 'Role', 'RegisteredAt'],
   requests: ['RequestID', 'Date', 'PersonID', 'PersonName', 'Type', 'Description', 'AssignedTo', 'Status', 'Notes'],
   communication: ['CommunicationID', 'PersonID', 'DonorName', 'Date', 'Channel', 'Type', 'Subject', 'Message', 'SentBy', 'Status'],
+  installmentPlans: ['PlanID', 'DonorID', 'Purpose', 'Schedule', 'LastReminderAt'],
   campaigns: ['CampaignID', 'ScheduledAt', 'Channel', 'Type', 'Subject', 'Message', 'Festival', 'Recipients', 'SentBy', 'Status', 'CreatedAt'],
 };
 
@@ -246,7 +248,7 @@ var READ_ROLES_ = Object.create(null);
   ['admin accountant manager viewer donor', 'getDonations donations getSettings settings'],
   ['admin accountant manager viewer', 'getUsers users getPeople people getExpenses expenses getVendors vendors getProjects projects getDashboardData getReports getAnnouncements announcements getMessages messages getEvents events getEventVolunteers eventVolunteers getRequests requests'],
   ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
-  ['admin accountant', 'getTransactions transactions'],
+  ['admin accountant', 'getTransactions transactions getInstallmentPlans'],
   ['admin', 'getAuditLog auditLog'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
@@ -257,7 +259,7 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin accountant manager viewer', 'sendMessage markMessageRead deleteMessage'],
   ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
   ['admin manager', 'createPerson updatePerson deletePerson createVendor updateVendor deleteVendor'],
-  ['admin accountant', 'createDonation bulkCreateDonations updateDonation createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
+  ['admin accountant', 'createDonation bulkCreateDonations updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
@@ -404,6 +406,12 @@ function route_(action, params, body, user) {
     // --- Writes (generic CRUD, one endpoint per table) ---
     case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
     case 'bulkCreateDonations': return bulkCreateRecords_(CONFIG.sheetNames.donations, HEADERS.donations, body.records, 'DON-', 'donation', ['DonorName', 'Amount']);
+    case 'getInstallmentPlans': return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans);
+    case 'createInstallmentPlan': return createInstallmentPlan_(body);
+    case 'linkInstallmentPayment': return linkInstallmentPayment_(body);
+    case 'recordInstallmentReminder':
+      return updateRecord_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans,
+        { PlanID: body.planID, LastReminderAt: new Date().toISOString() }, 'PlanID');
     case 'updateDonation': return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DonationID');
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
 
@@ -1113,7 +1121,7 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   var row = [];
   for (var i = 0; i < headers.length; i++) {
     var field = headers[i];
-    var val = isLedgerSheet_(sheetName) && (field === 'BankImportKey' || field === 'AccountID')
+    var val = field === 'InstallmentPlanID' ? '' : isLedgerSheet_(sheetName) && (field === 'BankImportKey' || field === 'AccountID')
       ? '' : sheetValue_(record[field]);
     if (headers[i] === idCol) val = id;
     row.push(val === undefined ? '' : val);
@@ -1218,7 +1226,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     // Build the row array matching header order
     var row = [];
     for (var h = 0; h < headers.length; h++) {
-      var val = sheetValue_(record[headers[h]]);
+      var val = headers[h] === 'InstallmentPlanID' ? '' : sheetValue_(record[headers[h]]);
       if (headers[h] === idCol) val = id;
       row.push(val === undefined ? '' : val);
     }
@@ -1260,6 +1268,46 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   return { created: accepted.length, skipped: records.length - accepted.length, prefix: prefix };
 }
 
+function createInstallmentPlan_(body) {
+  var donor = readAll_(CONFIG.sheetNames.people, HEADERS.people).find(function (person) {
+    return String(person.PersonID) === body.donorID && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(person.PersonType));
+  });
+  var purpose = String(body.purpose || '').trim();
+  var schedule = body.schedule;
+  if (!donor || !purpose || purpose.length > 200 || !Array.isArray(schedule) || !schedule.length || schedule.length > 120) {
+    throw new Error('Choose a donor, purpose, and 1–120 installments.');
+  }
+  var valid = schedule.every(function (item, index) {
+    if (!item || typeof item.due !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.due)) return false;
+    var date = new Date(item.due + 'T00:00:00Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === item.due &&
+      (!index || schedule[index - 1].due <= item.due) &&
+      Number.isSafeInteger(item.paise) && item.paise > 0 && item.paise <= 100000000000;
+  });
+  if (!valid) throw new Error('Enter valid due dates and positive installment amounts.');
+  return createRecord_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans, {
+    DonorID: body.donorID, Purpose: purpose, Schedule: JSON.stringify(schedule)
+  }, 'PLAN-', 'installmentPlans', ['DonorID', 'Purpose', 'Schedule']);
+}
+
+function linkInstallmentPayment_(body) {
+  var plan = readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans)
+    .find(function (row) { return String(row.PlanID) === body.planID; });
+  var donation = readAll_(CONFIG.sheetNames.donations, HEADERS.donations)
+    .find(function (row) { return String(row.DonationID) === body.donationID; });
+  if (!plan || !donation) throw new Error('Plan or active donation not found.');
+  if (body.unlink === true) {
+    if (donation.InstallmentPlanID !== plan.PlanID) throw new Error('This receipt is not linked to this plan.');
+  } else {
+    if (String(donation.DonorID) !== String(plan.DonorID)) throw new Error('Choose a receipt for this donor.');
+    if (donation.InstallmentPlanID && donation.InstallmentPlanID !== plan.PlanID) {
+      throw new Error('This receipt is already linked to another commitment.');
+    }
+  }
+  return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations,
+    { DonationID: donation.DonationID, InstallmentPlanID: body.unlink === true ? '' : plan.PlanID }, 'DonationID', true);
+}
+
 function linkImportedDonor_(record, people) {
   var person = people.find(function (p) { return String(p.PersonID) === String(record.DonorID) && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(p.PersonType)); });
   if (record.DonorID && !person) throw new Error('Linked donor profile no longer exists');
@@ -1275,7 +1323,7 @@ function readRowById_(sheetName, headers, idCol, id, row, rowNumber) {
   return obj;
 }
 
-function updateRecord_(sheetName, headers, record, idCol) {
+function updateRecord_(sheetName, headers, record, idCol, allowInstallmentLink) {
   if (!record || !record[idCol]) throw new Error('Missing ID for update');
   var id = record[idCol];
   var sheet = sheet_(sheetName);
@@ -1284,10 +1332,14 @@ function updateRecord_(sheetName, headers, record, idCol) {
 
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
+      if (sheetName === CONFIG.sheetNames.donations && data[r].InstallmentPlanID &&
+          record.DonorID !== undefined && String(record.DonorID) !== String(data[r].DonorID)) {
+        throw new Error('Unlink this receipt from its installment commitment before changing donors.');
+      }
       var values = [];
       for (var c = 0; c < headers.length; c++) {
         var field = headers[c];
-        var val = field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
+        var val = field === 'InstallmentPlanID' && !allowInstallmentLink || field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
           ? undefined : sheetValue_(record[field]);
         values.push(val === undefined ? sheetValue_(data[r][headers[c]]) : val);
       }

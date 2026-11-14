@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, Eye, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Plus, Pencil, Trash2, Eye, Upload, Link2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Modal, Badge, PageHeader, Field, Input, Select } from '../components/ui'
 import { BulkUploadModal, type ImportColumn } from '../components/BulkUploadModal'
@@ -7,9 +8,9 @@ import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ReceiptModal } from '../components/ReceiptModal'
-import { formatCurrency, formatDate, parseDateInput } from '../utils/helpers'
+import { formatCurrency, formatDate, normalizePhone, parseDateInput } from '../utils/helpers'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../utils/constants'
-import type { Donation } from '../types'
+import type { Donation, Person } from '../types'
 
 const buildImportColumns = (donorNames: string[]): ImportColumn[] => [
   { header: 'Date', key: 'date', required: true, type: 'date', example: '31-12-2026' },
@@ -30,16 +31,22 @@ const buildImportColumns = (donorNames: string[]): ImportColumn[] => [
 ]
 
 export function DonationsPage() {
-  const { donations, can, softDeleteDonation, bulkAddDonations, settings, people } = useApp()
+  const { donations, can, softDeleteDonation, bulkAddDonations, settings, people, updateDonation } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editDonation, setEditDonation] = useState<Donation | null>(null)
   const [viewDonation, setViewDonation] = useState<Donation | null>(null)
   const [receiptDonation, setReceiptDonation] = useState<Donation | null>(null)
+  const [linkDonation, setLinkDonation] = useState<Donation | null>(null)
+  const [linkFilter, setLinkFilter] = useState('')
   const [showBulk, setShowBulk] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('')
   const [methodFilter, setMethodFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+
+  const donorProfiles = useMemo(() => new Map(
+    people.filter((person) => person.personType.includes('Donor')).map((person) => [person.personID, person]),
+  ), [people])
 
   const donorNames = useMemo(() => {
     const names = new Set<string>()
@@ -80,13 +87,14 @@ export function DonationsPage() {
 
   const filtered = useMemo(() => {
     return donations.filter((d) => {
+      if (linkFilter && donorProfiles.has(d.donorID) !== (linkFilter === 'linked')) return false
       if (categoryFilter && d.category !== categoryFilter) return false
       if (methodFilter && d.paymentMethod !== methodFilter) return false
       if (dateFrom && d.date < dateFrom) return false
       if (dateTo && d.date > dateTo) return false
       return true
     })
-  }, [donations, categoryFilter, methodFilter, dateFrom, dateTo])
+  }, [donations, donorProfiles, linkFilter, categoryFilter, methodFilter, dateFrom, dateTo])
 
   const total = filtered.reduce((s, d) => s + d.amount, 0)
 
@@ -137,7 +145,14 @@ export function DonationsPage() {
         }
       />
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid grid-cols-2 lg:grid-cols-6 gap-3">
+        <Field label="Donor link">
+          <Select value={linkFilter} onChange={(e) => setLinkFilter(e.target.value)}>
+            <option value="">All donations</option>
+            <option value="unlinked">Unlinked</option>
+            <option value="linked">Linked</option>
+          </Select>
+        </Field>
         <Field label="Category">
           <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">All</option>
@@ -157,7 +172,7 @@ export function DonationsPage() {
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </Field>
         <div className="flex items-end">
-          <Button variant="secondary" size="md" className="w-full" onClick={() => { setCategoryFilter(''); setMethodFilter(''); setDateFrom(''); setDateTo('') }}>
+          <Button variant="secondary" size="md" className="w-full" onClick={() => { setLinkFilter(''); setCategoryFilter(''); setMethodFilter(''); setDateFrom(''); setDateTo('') }}>
             Reset
           </Button>
         </div>
@@ -177,6 +192,9 @@ export function DonationsPage() {
             <button onClick={() => setViewDonation(d)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500" title="View"><Eye size={15} /></button>
             {can('donations:write') && (
               <>
+                <Button variant="ghost" size="sm" onClick={() => setLinkDonation(d)}>
+                  <Link2 size={14} /> {donorProfiles.has(d.donorID) ? 'Change donor' : 'Link donor'}
+                </Button>
                 <button onClick={() => setEditDonation(d)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
                 <button onClick={() => handleDelete(d)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="Delete"><Trash2 size={15} /></button>
               </>
@@ -184,6 +202,26 @@ export function DonationsPage() {
           </div>
         )}
       />
+
+      <Modal open={!!linkDonation} onClose={() => setLinkDonation(null)} title="Link donation to donor">
+        {linkDonation && (
+          <LinkDonorForm
+            key={linkDonation.donationID}
+            donation={linkDonation}
+            people={people}
+            onSave={async (person) => {
+              await updateDonation({
+                donationID: linkDonation.donationID,
+                donorID: person.personID,
+                donorName: person.name,
+                phone: String(person.phone || ''),
+                email: person.email || '',
+              })
+              setLinkDonation(null)
+            }}
+          />
+        )}
+      </Modal>
 
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Donation" wide>
         <DonationForm onDone={() => setShowAdd(false)} />
@@ -266,5 +304,74 @@ function Info({ label, value }: { label: string; value: string }) {
       <dt className="text-xs text-slate-400">{label}</dt>
       <dd className="text-slate-700 font-medium">{value}</dd>
     </div>
+  )
+}
+
+
+function LinkDonorForm({ donation, people, onSave }: {
+  donation: Donation
+  people: Person[]
+  onSave: (person: Person) => Promise<void>
+}) {
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<Person | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const donors = people.filter((person) => person.personType.includes('Donor'))
+  const phoneOf = (value: unknown) => normalizePhone(String(value || ''))
+  const recordedPhone = phoneOf(donation.phone)
+  const recordedName = String(donation.donorName || '').trim().toLowerCase()
+  const search = query.trim().toLowerCase()
+  const phoneSearch = search && /^[+0-9 ()-]+$/.test(search) ? phoneOf(search) : ''
+  const matches = donors.filter((person) => !search
+    || person.name.toLowerCase().includes(search)
+    || String(person.email || '').toLowerCase().includes(search)
+    || (phoneSearch && phoneOf(person.phone).includes(phoneSearch)))
+  const rank = (person: Person) => {
+    if (recordedPhone && phoneOf(person.phone) === recordedPhone) return 0
+    return person.name.trim().toLowerCase() === recordedName ? 1 : 2
+  }
+  matches.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+
+  return (
+    <form className="space-y-4" onSubmit={async (event) => {
+      event.preventDefault()
+      if (!selected) return
+      setError('')
+      setSaving(true)
+      try {
+        await onSave(selected)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not link this donation.')
+      } finally {
+        setSaving(false)
+      }
+    }}>
+      <p className="text-sm text-slate-700">
+        <strong>{donation.donorName}</strong> · {formatCurrency(donation.amount)} · {formatDate(donation.date)}
+      </p>
+      <Field label="Find a donor" hint="Verify the donor’s mobile number before linking. The link can make this donation visible in My Donations.">
+        <Input value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null) }} placeholder="Search name, mobile number or email" disabled={saving} />
+      </Field>
+      <fieldset className="max-h-64 space-y-2 overflow-auto" disabled={saving}>
+        <legend className="sr-only">Donor profiles</legend>
+        {matches.slice(0, 20).map((person) => (
+          <label key={person.personID} className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-2 text-sm">
+            <input type="radio" name="donor" className="mt-1" checked={selected?.personID === person.personID} onChange={() => setSelected(person)} />
+            <span>
+              <strong>{person.name}</strong>
+              <span className="block text-slate-600">{[person.phone, person.email].filter(Boolean).join(' · ') || 'No contact details'}</span>
+              {rank(person) === 0 && <span className="text-xs text-slate-600">Matches the donation’s mobile number</span>}
+              {rank(person) === 1 && <span className="text-xs text-slate-600">Matches the recorded name</span>}
+            </span>
+          </label>
+        ))}
+        {!matches.length && <p className="text-sm text-slate-600">No matching donor profiles. Try a different search or add the donor under <Link to="/people" className="underline">People</Link>.</p>}
+      </fieldset>
+      {matches.length > 20 && <p className="text-xs text-slate-600">Showing the first 20 matches. Search to narrow the list.</p>}
+      {selected && <p className="text-sm text-slate-700">Selected: {selected.name}{selected.phone ? ' · ' + selected.phone : ' · No mobile number on profile'}</p>}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <Button type="submit" disabled={!selected || saving}>{saving ? 'Linking…' : 'Link donation'}</Button>
+    </form>
   )
 }
