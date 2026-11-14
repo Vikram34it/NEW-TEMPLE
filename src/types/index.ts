@@ -149,6 +149,7 @@ export interface Account {
 export type TransactionType = 'income' | 'expense'
 
 export interface Transaction {
+  personID?: string
   bankImportKey?: string
   accountID?: string
   bankCategory?: string

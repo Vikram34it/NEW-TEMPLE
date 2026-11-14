@@ -5,7 +5,7 @@ import { Button, Modal, Badge, PageHeader, Field, Input, Select, Textarea } from
 import { BulkUploadModal, type ImportColumn } from '../components/BulkUploadModal'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
-import { formatCurrency, formatDate } from '../utils/helpers'
+import { formatCurrency, formatDate, normalizePhone } from '../utils/helpers'
 import { PERSON_TYPES, PERSON_CHANNELS } from '../utils/constants'
 import type { Person } from '../types'
 
@@ -27,7 +27,39 @@ const PERSON_IMPORT_COLUMNS: ImportColumn[] = [
 ]
 
 export function PeoplePage() {
-  const { people, donations, expenses, communications, can, deletePerson, bulkAddPeople, importDonorProfiles } = useApp()
+  const { people, donations, expenses, communications, can, deletePerson, bulkAddPeople, importDonorProfiles, linkDonorReceipts } = useApp()
+  const [selectedDonors, setSelectedDonors] = useState<string[]>([])
+  const [reviewLinks, setReviewLinks] = useState(false)
+  const [savingLinks, setSavingLinks] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  const [linkMessage, setLinkMessage] = useState('')
+  const [excludedReceipts, setExcludedReceipts] = useState<string[]>([])
+  const canLink = can('donations:write')
+  const proposedLinks = useMemo(() => {
+    const nameKey = (name: string) => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    const profiles = new Map<string, Person[]>()
+    people.forEach((person) => {
+      const key = nameKey(person.name)
+      if (key) profiles.set(key, [...(profiles.get(key) || []), person])
+    })
+    return donations.flatMap((donation) => {
+      if (donation.deleted || donation.donorID || donation.installmentPlanID) return []
+      const key = nameKey(donation.donorName)
+      if (!key || /^(?:unknown(?: donor)?|anonymous(?: donor)?|n\/?a|-|—)$/.test(key)) return []
+      const matches = profiles.get(key)
+      if (matches?.length !== 1) return []
+      const person = matches[0]
+      if (!selectedDonors.includes(person.personID) || !person.personType.includes('Donor')) return []
+      const receiptPhone = normalizePhone(String(donation.phone || ''))
+      const donorPhone = normalizePhone(String(person.phone || ''))
+      const receiptEmail = String(donation.email || '').trim().toLowerCase()
+      const donorEmail = String(person.email || '').trim().toLowerCase()
+      if (receiptPhone && receiptPhone !== donorPhone || receiptEmail && receiptEmail !== donorEmail) return []
+      return [{ donation, person }]
+    })
+  }, [people, donations, selectedDonors])
+  const approvedLinks = proposedLinks.filter(({ donation }) => !excludedReceipts.includes(donation.donationID))
+
   const [showAdd, setShowAdd] = useState(false)
   const [editPerson, setEditPerson] = useState<Person | null>(null)
   const [viewPerson, setViewPerson] = useState<Person | null>(null)
@@ -88,6 +120,13 @@ export function PeoplePage() {
   ]
 
   const columns: Column<Person>[] = [
+    ...(canLink ? [{ header: 'Select', accessor: (person: Person) => person.personType.includes('Donor') && (
+      <input type="checkbox" aria-label={'Select ' + person.name} checked={selectedDonors.includes(person.personID)}
+        onChange={(event) => {
+          const checked = event.target.checked
+          setSelectedDonors((ids) => checked ? [...ids, person.personID] : ids.filter((id) => id !== person.personID))
+        }} />
+    ) }] : []),
     { header: 'Name', accessor: (p) => <span className="font-medium text-slate-700">{p.name}</span>, sortable: true, sortKey: 'name' },
     { header: 'Phone', accessor: (p) => p.phone || '—' },
     { header: 'City', accessor: (p) => p.city || '—' },
@@ -141,7 +180,9 @@ export function PeoplePage() {
         ))}
       </div>
 
+      {linkMessage && <p role="status" className="text-sm text-slate-700">{linkMessage}</p>}
       <DataTable
+        toolbar={canLink && selectedDonors.length > 0 && <Button size="sm" onClick={() => { setExcludedReceipts([]); setLinkError(''); setLinkMessage(''); setReviewLinks(true) }}>Review donation links ({selectedDonors.length} selected)</Button>}
         columns={columns}
         data={filtered}
         searchable
@@ -162,6 +203,39 @@ export function PeoplePage() {
           </div>
         )}
       />
+
+      <Modal open={reviewLinks} onClose={() => { if (!savingLinks) setReviewLinks(false) }} title="Review donation links" wide>
+        <p className="mb-3 text-sm text-slate-600">Check each receipt before linking. Saving copies the donor profile’s contact details to the receipt and can make it visible in My Donations. Duplicate names and conflicting contact details require individual review in Donations.</p>
+        {!proposedLinks.length && <p className="text-sm">No unlinked receipts matched the selected donors.</p>}
+        <ul className="max-h-72 space-y-2 overflow-auto">
+          {proposedLinks.map(({ donation, person }) => <li key={donation.donationID}>
+            <label className="flex items-start gap-2 rounded border border-slate-200 p-2 text-sm">
+              <input type="checkbox" disabled={savingLinks} checked={!excludedReceipts.includes(donation.donationID)}
+                onChange={(event) => {
+                  const checked = event.target.checked
+                  setExcludedReceipts((ids) => checked ? ids.filter((id) => id !== donation.donationID) : [...ids, donation.donationID])
+                }} />
+              <span><strong>{person.name}</strong> · {formatCurrency(donation.amount)} · {formatDate(donation.date)} · {donation.receiptNumber || donation.donationID}
+                {person.phone && <span className="block text-slate-600">{person.phone}</span>}</span>
+            </label>
+          </li>)}
+        </ul>
+        {linkError && <p role="alert" className="mt-3 text-sm text-red-700">{linkError}</p>}
+        <Button className="mt-4" disabled={savingLinks || !approvedLinks.length} onClick={async () => {
+          setSavingLinks(true)
+          setLinkError('')
+          try {
+            await linkDonorReceipts(approvedLinks.map(({ donation, person }) => ({ donationID: donation.donationID, donorID: person.personID })))
+            setSelectedDonors([])
+            setReviewLinks(false)
+            setLinkMessage('Linked ' + approvedLinks.length + ' donation receipt(s).')
+          } catch (err) {
+            setLinkError(err instanceof Error ? err.message : 'Could not finish linking receipts.')
+          } finally {
+            setSavingLinks(false)
+          }
+        }}>{savingLinks ? 'Linking…' : 'Link ' + approvedLinks.length + ' receipt(s)'}</Button>
+      </Modal>
 
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Person" wide>
         <PersonForm onDone={() => setShowAdd(false)} />

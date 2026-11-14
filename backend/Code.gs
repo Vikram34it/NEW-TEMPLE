@@ -177,7 +177,7 @@ var HEADERS = {
   projects: ['ProjectID', 'ProjectName', 'Description', 'StartDate', 'EstimatedBudget', 'ActualExpense', 'Status', 'Contractor'],
   payments: ['PaymentID', 'Date', 'PersonOrVendor', 'AmountDue', 'AmountPaid', 'RemainingAmount', 'DueDate', 'Project', 'Status', 'Notes'],
   accounts: ['AccountID', 'AccountName', 'OpeningBalance', 'CurrentBalance', 'Type', 'Notes'],
-  transactions: ['TransactionID', 'Date', 'Type', 'IncomeOrExpense', 'Amount', 'Account', 'ReferenceID', 'Description', 'CreatedBy', 'AccountID', 'BankImportKey', 'BankCategory'],
+  transactions: ['TransactionID', 'Date', 'Type', 'IncomeOrExpense', 'Amount', 'Account', 'ReferenceID', 'Description', 'CreatedBy', 'AccountID', 'BankImportKey', 'BankCategory', 'PersonID'],
   audit: ['LogID', 'DateTime', 'User', 'Action', 'Module', 'RecordID', 'OldValue', 'NewValue'],
   announcements: ['AnnouncementID', 'Title', 'Body', 'PostedBy', 'PostedAt', 'Pinned', 'ExpiresAt', 'Status', 'Deleted'],
   messages: ['MessageID', 'SenderEmail', 'SenderName', 'RecipientEmail', 'Subject', 'Body', 'SentAt', 'Read', 'ReadAt', 'DeletedBySender', 'DeletedByRecipient'],
@@ -259,7 +259,7 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin accountant manager viewer', 'sendMessage markMessageRead deleteMessage'],
   ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
   ['admin manager', 'createPerson importDonorProfiles updatePerson deletePerson createVendor updateVendor deleteVendor'],
-  ['admin accountant', 'createDonation bulkCreateDonations updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
+  ['admin accountant', 'createDonation bulkCreateDonations bulkLinkDonorReceipts linkTransactionsToPerson updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
@@ -412,6 +412,8 @@ function route_(action, params, body, user) {
     case 'recordInstallmentReminder':
       return updateRecord_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans,
         { PlanID: body.planID, LastReminderAt: new Date().toISOString() }, 'PlanID');
+    case 'bulkLinkDonorReceipts': return bulkLinkDonorReceipts_(body.links);
+    case 'linkTransactionsToPerson': return linkTransactionsToPerson_(body);
     case 'updateDonation': return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DonationID');
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
 
@@ -1309,6 +1311,83 @@ function linkInstallmentPayment_(body) {
     { DonationID: donation.DonationID, InstallmentPlanID: body.unlink === true ? '' : plan.PlanID }, 'DonationID', true);
 }
 
+function linkTransactionsToPerson_(body) {
+  if (!Array.isArray(body.transactions) || !body.transactions.length) throw new Error('Select transactions first.');
+  var person = readAll_(CONFIG.sheetNames.people, HEADERS.people).find(function (row) {
+    return String(row.PersonID) === body.personID;
+  });
+  if (!person) throw new Error('Person profile not found.');
+  var headers = HEADERS.transactions;
+  var sheet = sheet_(CONFIG.sheetNames.transactions);
+  var rows = tableData_(CONFIG.sheetNames.transactions, headers);
+  var donations = new Map(readAll_(CONFIG.sheetNames.donations, HEADERS.donations).map(function (row) {
+    return [String(row.DonationID), row];
+  }));
+  var byID = new Map(rows.map(function (row, index) { return [String(row.TransactionID), index]; }));
+  var indexes = new Set();
+  body.transactions.forEach(function (target) {
+    var index = byID.get(String(target.transactionID));
+    var row = rows[index];
+    if (!row || String(row.ReferenceID || '') !== target.referenceID ||
+        String(row.Date || '') !== target.date || Number(row.Amount) !== target.amount || indexes.has(index)) {
+      throw new Error('A transaction changed. Refresh and select the rows again.');
+    }
+    var donation = donations.get(String(row.ReferenceID));
+    if (donation && (donation.DonorID && donation.DonorID !== person.PersonID || donation.InstallmentPlanID && donation.DonorID !== person.PersonID)) {
+      throw new Error('A receipt belongs to another donor. Review it in Donations.');
+    }
+    indexes.add(index);
+  });
+  ensureColumnCapacity_(sheet, headers.length);
+  var column = headers.indexOf('PersonID') + 1;
+  sheet.getRange(1, column).setValue('PersonID');
+  var personIDs = rows.map(function (row, index) {
+    return [sheetValue_(indexes.has(index) ? person.PersonID : row.PersonID || '')];
+  });
+  sheet.getRange(2, column, personIDs.length, 1).setValues(personIDs);
+  audit_('transactions', 'LinkPerson', String(person.PersonID), '', JSON.stringify(body.transactions.map(function (item) { return item.transactionID; })));
+  return { linked: indexes.size };
+}
+
+function bulkLinkDonorReceipts_(links) {
+  if (!Array.isArray(links) || !links.length) throw new Error('Choose receipts to link.');
+  function nameKey(name) { return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+  function emailKey(email) { return String(email || '').trim().toLowerCase(); }
+  var people = readAll_(CONFIG.sheetNames.people, HEADERS.people);
+  var sheet = sheet_(CONFIG.sheetNames.donations);
+  var headers = HEADERS.donations;
+  var donations = tableData_(CONFIG.sheetNames.donations, headers);
+  var rowsByID = new Map(donations.map(function (donation, index) { return [String(donation.DonationID), index]; }));
+  var seen = new Set();
+  var reviewed = links.map(function (link) {
+    var index = rowsByID.get(String(link.donationID));
+    var donation = donations[index];
+    if (!donation || !notDeleted_(donation) || donation.DonorID || donation.InstallmentPlanID || seen.has(index)) {
+      throw new Error('A receipt is repeated or no longer eligible. Refresh and review the links again.');
+    }
+    seen.add(index);
+    var key = nameKey(donation.DonorName);
+    var matches = people.filter(function (person) { return nameKey(person.Name) === key; });
+    var person = matches[0];
+    if (!key || /^(?:unknown(?: donor)?|anonymous(?: donor)?|n\/?a|-|—)$/.test(key) ||
+        matches.length !== 1 || String(person.PersonID) !== String(link.donorID) ||
+        !/(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(person.PersonType)) ||
+        (normalizePhone_(donation.Phone) && normalizePhone_(donation.Phone) !== normalizePhone_(person.Phone)) ||
+        (emailKey(donation.Email) && emailKey(donation.Email) !== emailKey(person.Email))) {
+      throw new Error('A donor match changed or is ambiguous. Refresh and review the links again.');
+    }
+    return { row: index + 2, person: person };
+  });
+  reviewed.forEach(function (entry) {
+    var person = entry.person;
+    sheet.getRange(entry.row, headers.indexOf('DonorID') + 1, 1, 4)
+      .setValues([[person.PersonID, person.Name, person.Phone || '', person.Email || ''].map(sheetValue_)]);
+  });
+  audit_('donations', 'BulkLink', String(reviewed.length), '', JSON.stringify(links));
+  resyncLedger_();
+  return { linked: reviewed.length };
+}
+
 function importDonorProfiles_() {
   var people = readAll_(CONFIG.sheetNames.people, HEADERS.people);
   var names = new Set(people.map(function (person) {
@@ -1917,6 +1996,7 @@ function reconcileLedger_() {
     return !(ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0);
   });
 
+  var personBySource = new Map(txData.map(function (row) { return [String(row.ReferenceID), row.PersonID]; }));
   var desired = [];
   donations.forEach(function (d) {
     desired.push({
@@ -1957,7 +2037,7 @@ function reconcileLedger_() {
     rows.push([
       'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
-      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy), '', '', '',
+      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy), '', '', '', sheetValue_(personBySource.get(ent.referenceID) || ''),
     ]);
   });
 

@@ -130,6 +130,8 @@ interface AppContextValue {
   addPerson: (p: Omit<Person, 'personID'>) => Promise<Person>
   updatePerson: (p: Person) => Promise<void>
   deletePerson: (id: string) => Promise<void>
+  linkTransactionsToPerson: typeof dataService.linkTransactionsToPerson
+  linkDonorReceipts: (links: Array<{ donationID: string; donorID: string }>) => Promise<void>
   importDonorProfiles: () => Promise<{ created: number }>
   bulkAddPeople: (items: Array<Omit<Person, 'personID'>>) => Promise<Person[]>
 
@@ -671,6 +673,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } else {
       audit('Delete', 'People', id)
+    }
+  }
+
+  async function linkDonorReceipts(links: Array<{ donationID: string; donorID: string }>) {
+    try {
+      if (CONFIG_USE_LIVE) {
+        await dataService.bulkLinkDonorReceipts(links)
+        await refreshAll()
+        return
+      }
+      for (const link of links) {
+        const person = people.find((entry) => entry.personID === link.donorID)
+        if (!person) throw new Error('The donor profile is no longer available.')
+        await dataService.persist('donations', 'update', {
+          ...link, donorName: person.name, phone: person.phone || '', email: person.email || '',
+        })
+      }
+      await refreshAll()
+    } catch (err) {
+      await refreshAllSafe()
+      throw err
     }
   }
 
@@ -1419,6 +1442,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deletePerson,
     bulkAddPeople,
     importDonorProfiles,
+    linkDonorReceipts,
+    linkTransactionsToPerson: async (personID, rows) => {
+      await dataService.linkTransactionsToPerson(personID, rows)
+      const fresh = await dataService.getTransactions()
+      setTransactions([...fresh])
+    },
     addVendor,
     updateVendor,
     deleteVendor,

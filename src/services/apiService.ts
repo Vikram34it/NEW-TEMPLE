@@ -287,6 +287,7 @@ export function reconcileMockLedger() {
     (t) => !t.referenceID || !/^(DON|EXP)-/i.test(t.referenceID),
   )
 
+  const personBySource = new Map((store.transactions as Transaction[]).map((row) => [row.referenceID, row.personID]))
   const auto: Transaction[] = []
   donations.forEach((d) => {
     mockTxnSeq++
@@ -298,6 +299,7 @@ export function reconcileMockLedger() {
       amount: d.amount,
       account: accounts.find((a) => a.accountID === d.accountID)?.accountName ?? accountNameForPaymentMethod(d.paymentMethod, accounts),
       referenceID: d.donationID,
+      personID: personBySource.get(d.donationID),
       description: `Donation - ${d.donorName || ''}`,
       createdBy: d.receivedBy || 'system',
     })
@@ -312,6 +314,7 @@ export function reconcileMockLedger() {
       amount: e.amount,
       account: accounts.find((a) => a.accountID === e.accountID)?.accountName ?? accountNameForPaymentMethod(e.paymentMethod, accounts),
       referenceID: e.expenseID,
+      personID: personBySource.get(e.expenseID),
       description: `Expense - ${e.description || ''}`,
       createdBy: e.paidBy || 'system',
     })
@@ -418,6 +421,16 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
+  async linkTransactionsToPerson(personID: string, transactions: Pick<Transaction, 'transactionID' | 'referenceID' | 'date' | 'amount'>[]) {
+    if (!CONFIG.useMockData && CONFIG.webAppUrl) return apiFetch('linkTransactionsToPerson', {}, { personID, transactions })
+    const ids = new Set(transactions.map((row) => row.transactionID))
+    const rows = mockStore.data.transactions as Transaction[]
+    rows.forEach((row) => { if (ids.has(row.transactionID)) row.personID = personID })
+  },
+
+  async bulkLinkDonorReceipts(links: Array<{ donationID: string; donorID: string }>) {
+    return apiFetch('bulkLinkDonorReceipts', {}, { links })
+  },
   async importDonorProfiles(): Promise<{ created: number }> {
     return apiFetch('importDonorProfiles', {}, {}) as Promise<{ created: number }>
   },

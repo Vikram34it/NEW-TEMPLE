@@ -8,13 +8,19 @@ import { formatCurrency, formatDate, todayStr } from '../utils/helpers'
 import type { Donation, Expense, Transaction } from '../types'
 
 export function TransactionsPage() {
-  const { transactions, accounts, donations, expenses, addTransaction, clearBankTransactions, user, can } = useApp()
+  const { transactions, accounts, donations, expenses, people, linkTransactionsToPerson, addTransaction, clearBankTransactions, user, can } = useApp()
   const [typeFilter, setTypeFilter] = useState('')
   const [accountFilter, setAccountFilter] = useState('')
   const [query, setQuery] = useState('')
   const [purposeFilter, setPurposeFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [showLink, setShowLink] = useState(false)
+  const [personID, setPersonID] = useState('')
+  const [linkError, setLinkError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const canLink = can('donations:write')
   const [showRecord, setShowRecord] = useState(false)
 
   const ledgerRows = useMemo(() => {
@@ -26,11 +32,12 @@ export function TransactionsPage() {
       const source = sourceRecords.get(transaction.referenceID)
       return {
         ...transaction,
+        linkedPerson: people.find((person) => person.personID === (transaction.personID || (source && 'donorID' in source ? source.donorID : undefined)))?.name || '',
         bankCategory: transaction.bankCategory || source?.category || '',
         bankReference: source?.transactionReference || (transaction.bankImportKey ? transaction.referenceID : ''),
       }
     })
-  }, [transactions, donations, expenses])
+  }, [transactions, donations, expenses, people])
   const purposes = [...new Set(ledgerRows.map((row) => row.bankCategory).filter(Boolean))].sort()
   const hasFilters = Boolean(typeFilter || accountFilter || purposeFilter || dateFrom || dateTo || query)
   const invalidRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
@@ -39,7 +46,7 @@ export function TransactionsPage() {
     const search = query.trim().toLowerCase()
     return ledgerRows.filter((t) => {
       if (purposeFilter && t.bankCategory !== purposeFilter) return false
-      if (search && ![t.bankReference, t.referenceID, t.description, t.account, t.bankCategory].some((value) => String(value ?? '').toLowerCase().includes(search))) return false
+      if (search && ![t.bankReference, t.referenceID, t.description, t.account, t.bankCategory, t.linkedPerson].some((value) => String(value ?? '').toLowerCase().includes(search))) return false
       if (typeFilter && t.incomeOrExpense !== typeFilter) return false
       if (accountFilter && t.account !== accountFilter) return false
       if (dateFrom && t.date < dateFrom) return false
@@ -59,12 +66,19 @@ export function TransactionsPage() {
     { header: 'Account', accessor: (t: Transaction) => t.account },
     { header: 'Reference', accessor: (t: Transaction) => t.referenceID },
     { header: 'Bank reference', accessor: (t: LedgerRow) => t.bankReference },
+    { header: 'Linked person', accessor: (t: LedgerRow) => t.linkedPerson },
     { header: 'Purpose', accessor: (t: Transaction) => t.bankCategory || '' },
     { header: 'Description', accessor: (t: Transaction) => t.description },
     { header: 'Created By', accessor: (t: Transaction) => t.createdBy },
   ]
 
   const columns: Column<LedgerRow>[] = [
+    ...(canLink ? [{ header: 'Select', accessor: (t: LedgerRow) => <input type="checkbox" aria-label={'Select ' + t.transactionID}
+      checked={selected.includes(t.transactionID)} onChange={(event) => {
+        const checked = event.target.checked
+        setSelected((ids) => checked ? [...ids, t.transactionID] : ids.filter((id) => id !== t.transactionID))
+      }} /> }] : []),
+    { header: 'Linked person', accessor: (t) => t.linkedPerson || '—' },
     { header: 'Date', accessor: (t) => formatDate(t.date), sortable: true, sortKey: 'date' },
     { header: 'Type', accessor: (t) => <Badge color={t.incomeOrExpense === 'income' ? 'green' : 'red'}>{t.incomeOrExpense}</Badge> },
     { header: 'Amount', accessor: (t) => (
@@ -133,6 +147,7 @@ export function TransactionsPage() {
         columns={columns}
         data={filtered}
         toolbar={<>
+          {canLink && selected.length > 0 && <Button size="sm" onClick={() => { setPersonID(''); setLinkError(''); setShowLink(true) }}>Link selected ({selected.length})</Button>}
           <Input aria-label="Search transactions" placeholder="Search reference, description, account or purpose" className="min-w-0 flex-1" value={query} onChange={(e) => setQuery(e.target.value)} />
           {hasFilters && <Button variant="ghost" size="sm" onClick={() => {
             setQuery('')
@@ -150,6 +165,32 @@ export function TransactionsPage() {
         rowKey={(t) => t.transactionID}
       />
 
+      <Modal open={showLink} onClose={() => { if (!saving) setShowLink(false) }} title="Link transactions to a person">
+        <div className="space-y-3">
+          <Field label="Person or donor">
+            <Select value={personID} onChange={(event) => setPersonID(event.target.value)} disabled={saving}>
+              <option value="">Choose an existing profile</option>
+              {[...people].sort((a, b) => a.name.localeCompare(b.name)).map((person) => (
+                <option key={person.personID} value={person.personID}>{person.name}{person.phone ? ' · ' + person.phone : ''}</option>
+              ))}
+            </Select>
+          </Field>
+          <p className="text-sm text-slate-600">This records the person on the selected transactions. For donation history or receipts, link the donation itself in Donations.</p>
+          {linkError && <p role="alert" className="text-sm text-red-700">{linkError}</p>}
+          <Button disabled={!personID || saving} onClick={async () => {
+            setSaving(true)
+            setLinkError('')
+            const targets = ledgerRows.filter((row) => selected.includes(row.transactionID))
+            try {
+              await linkTransactionsToPerson(personID, targets.map(({ transactionID, referenceID, date, amount }) => ({ transactionID, referenceID: String(referenceID || ''), date, amount })))
+              setSelected([])
+              setShowLink(false)
+            } catch (err) {
+              setLinkError(err instanceof Error ? err.message : 'Could not link transactions.')
+            } finally { setSaving(false) }
+          }}>{saving ? 'Linking…' : 'Link transactions'}</Button>
+        </div>
+      </Modal>
       <Modal
         open={showRecord}
         onClose={() => setShowRecord(false)}
