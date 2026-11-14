@@ -7,8 +7,6 @@ import { dataService } from '../services/apiService'
 import { Button, Card, Field, Input, Modal, Select } from '../components/ui'
 import type { Role } from '../types'
 
-type LoginMode = 'admin' | 'user' | 'donor'
-
 const demoAccounts = [
   { role: 'Admin', email: 'admin@temple.org', pass: 'admin123' },
   { role: 'Accountant', email: 'accountant@temple.org', pass: 'accountant123' },
@@ -17,16 +15,9 @@ const demoAccounts = [
   { role: 'Donor', email: 'donor@temple.org', mob: '9845012345', pass: 'donor123' },
 ]
 
-const modes: { key: LoginMode; label: string }[] = [
-  { key: 'admin', label: 'Admin Login' },
-  { key: 'user', label: 'User Login' },
-  { key: 'donor', label: 'Donor Login' },
-]
-
-export function LoginPage() {
+export function LoginPage({ staff = false }: { staff?: boolean }) {
   const { user, login } = useApp()
   const navigate = useNavigate()
-  const [mode, setMode] = useState<LoginMode>('donor')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -51,13 +42,8 @@ export function LoginPage() {
     }
   }
 
-  const visibleAccounts = demoAccounts.filter((a) =>
-    mode === 'admin' ? a.role === 'Admin'
-    : mode === 'donor' ? a.role === 'Donor'
-    : a.role !== 'Admin' && a.role !== 'Donor'
-  )
-
-  const isDonorMode = mode === 'donor'
+  const isDonorMode = !staff
+  const visibleAccounts = demoAccounts.filter((account) => (account.role === 'Donor') === isDonorMode)
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
@@ -67,7 +53,7 @@ export function LoginPage() {
             <Signature size={32} />
           </div>
           <h1 className="text-2xl font-bold text-slate-800">Temple Management</h1>
-          <p className="text-slate-500 text-sm mt-1">Sign in to your account</p>
+          <p className="text-slate-500 text-sm mt-1">{staff ? 'Staff and Admin Login' : 'Donor Login'}</p>
         </div>
 
         {CONFIG.useMockData && (
@@ -77,26 +63,11 @@ export function LoginPage() {
         )}
 
         <Card className="p-6">
-          <div className="flex rounded-lg bg-slate-100 p-1 mb-5">
-            {modes.map((m) => (
-              <button
-                key={m.key}
-                type="button"
-                onClick={() => { setMode(m.key); setError(''); setActivationNotice('') }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-                  mode === m.key ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             {activationNotice && <p role="status" className="text-sm text-emerald-700">{activationNotice}</p>}
             {isDonorMode && (
               <p className="text-xs text-slate-500 bg-orange-50 border border-orange-200 rounded-lg p-2.5">
-                Donor? Sign in with the <strong>mobile number</strong> or email registered with the temple to view your donations and receipts.
+                Sign in with your registered mobile number or email to view your donations and receipts.
               </p>
             )}
             <Field label={isDonorMode ? 'Mobile Number or Email' : 'Email'} required>
@@ -139,7 +110,7 @@ export function LoginPage() {
             </Button>
           </form>
 
-          {mode !== 'donor' && CONFIG.useMockData && (
+          {staff && CONFIG.useMockData && (
             <div className="mt-5 pt-4 border-t border-slate-100 text-center">
               <button
                 type="button"
