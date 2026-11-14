@@ -1646,76 +1646,76 @@ function prepareUserWrite_(record, creating) {
   })) throw new Error('Email or phone already belongs to another user');
 }
 
-function activationDonor_(phone) {
-  var people = readAll_(CONFIG.sheetNames.people, HEADERS.people).filter(function (person) {
-    return normalizePhone_(person.Phone) === phone;
+function activationDonor_(email) {
+  var people = readAll_(CONFIG.sheetNames.people, HEADERS.people);
+  var matches = people.filter(function (person) {
+    return activationEmail_(person.Email) === email;
   });
-  if (people.length !== 1 || !people[0].PersonID ||
-      String(people[0].Status).toLowerCase() !== 'active' ||
-      !/(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(people[0].PersonType))) return null;
-  var id = String(people[0].PersonID);
-  var receipts = readDonations_('', phone, true);
-  if (!receipts.some(function (row) { return String(row.DonorID) === id; }) ||
-      receipts.some(function (row) { return row.DonorID && String(row.DonorID) !== id; })) return null;
+  var donor = matches[0];
+  if (matches.length !== 1 || !donor.PersonID ||
+      String(donor.Status).toLowerCase() !== 'active' ||
+      !/(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(donor.PersonType))) return null;
+  var id = String(donor.PersonID);
+  var phone = normalizePhone_(donor.Phone);
+  if (!readDonations_().some(function (row) { return String(row.DonorID) === id; })) return null;
   var exists = readAll_(CONFIG.sheetNames.users, HEADERS.users).some(function (user) {
-    return normalizePhone_(user.Phone) === phone || String(user.DonorPersonID) === id;
+    return activationEmail_(user.Email) === email || (phone && normalizePhone_(user.Phone) === phone) ||
+      String(user.DonorPersonID) === id;
   });
-  return exists ? null : people[0];
+  if (exists) return null;
+  var uniquePhone = phone && people.filter(function (person) {
+    return normalizePhone_(person.Phone) === phone;
+  }).length === 1;
+  return { PersonID: id, Name: donor.Name, Phone: uniquePhone ? phone : '' };
 }
 
-function activationPhone_(raw) {
-  var value = String(raw || '').trim();
-  return /^[+0-9 ()-]+$/.test(value) ? normalizePhone_(value) : '';
+function activationEmail_(raw) {
+  var value = String(raw || '').trim().toLowerCase();
+  return value.length <= 254 && /^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(value) ? value : '';
 }
 
 function requestDonorOtp_(body) {
-  var phone = activationPhone_(body.phone);
-  if (!/^[6-9]\d{9}$/.test(phone)) throw new Error('Enter a valid Indian mobile number.');
-  var settings = getSettings_();
-  var provider = String(settings.smsProvider || '').trim().toLowerCase();
-  if (!settings.smsApiKey || ['msg91', 'textlocal', 'twilio', 'custom'].indexOf(provider) < 0) {
-    throw new Error('SMS activation is not configured. Please contact the temple office.');
-  }
+  var email = activationEmail_(body.email);
+  if (!email) throw new Error('Enter a valid email address.');
   var cache = CacheService.getScriptCache();
-  var key = 'donor-otp:' + digest_(phone);
+  var key = 'donor-email-otp:' + digest_(email);
   var quota = 'donor-otp-quota:' + Math.floor(Date.now() / 3600000);
-  var phoneQuota = key + ':' + quota;
+  var emailQuota = key + ':' + quota;
   var total = Number(cache.get(quota) || 0);
-  var attempts = Number(cache.get(phoneQuota) || 0);
+  var attempts = Number(cache.get(emailQuota) || 0);
   if (cache.get(key + ':wait') || attempts >= 3 || total >= 60) return {};
+  var donor = activationDonor_(email);
+  if (!donor) return {};
   cache.put(key + ':wait', '1', 60);
   cache.put(quota, String(total + 1), 3600);
-  cache.put(phoneQuota, String(attempts + 1), 3600);
-  var donor = activationDonor_(phone);
-  if (!donor) return {};
+  cache.put(emailQuota, String(attempts + 1), 3600);
   var code = String(parseInt(randomToken_().slice(0, 8), 16) % 1000000).padStart(6, '0');
   var nonce = randomToken_();
   var expires = Date.now() + 300000;
   cache.remove(key);
   try {
-    sendOneSms_(provider, settings, (provider === 'twilio' ? '+91' : '91') + phone,
+    GmailApp.sendEmail(email, 'Temple donor account activation',
       'Your temple donor account activation code is ' + code + '. It expires in 5 minutes. Do not share it.');
     cache.put(key, JSON.stringify({
       donorID: String(donor.PersonID), nonce: nonce, verifier: passwordVerifier_(code, nonce),
       expires: expires, attempts: 0
     }), 300);
   } catch (err) {
-    // Gateway errors can contain credentials or the code.
-    console.warn('Donor activation SMS delivery failed.');
+    console.warn('Donor activation email delivery failed.');
   }
   return {};
 }
 
 function activateDonor_(body) {
-  var phone = activationPhone_(body.phone);
+  var email = activationEmail_(body.email);
   var code = String(body.code || '').trim();
   var password = body.password;
   if (typeof password !== 'string' || password.length < 15 || password.length > 256 || isSeedPassword_(password)) {
     throw new Error('Choose a password between 15 and 256 characters.');
   }
   var cache = CacheService.getScriptCache();
-  var key = 'donor-otp:' + digest_(phone);
-  var raw = /^[6-9]\d{9}$/.test(phone) && /^\d{6}$/.test(code) && cache.get(key);
+  var key = 'donor-email-otp:' + digest_(email);
+  var raw = email && /^\d{6}$/.test(code) && cache.get(key);
   if (!raw) throw new Error('Invalid or expired code. Request a new code if needed.');
   var challenge = JSON.parse(raw);
   var remaining = Math.ceil((challenge.expires - Date.now()) / 1000);
@@ -1730,12 +1730,12 @@ function activateDonor_(body) {
     throw new Error('Invalid or expired code. Request a new code if needed.');
   }
   cache.remove(key);
-  var donor = activationDonor_(phone);
+  var donor = activationDonor_(email);
   if (!donor || String(donor.PersonID) !== challenge.donorID) {
     throw new Error('This account could not be activated. Please contact the temple office.');
   }
   var record = {
-    Name: donor.Name, Email: '', Phone: phone, Role: 'donor', Status: 'active', DonorPersonID: challenge.donorID,
+    Name: donor.Name, Email: email, Phone: donor.Phone, Role: 'donor', Status: 'active', DonorPersonID: challenge.donorID,
     CreatedDate: new Date().toISOString(), Password: passwordVerifier_(password, randomToken_())
   };
   var usersSheet = sheet_(CONFIG.sheetNames.users);
@@ -1743,7 +1743,7 @@ function activateDonor_(body) {
   var identityHeader = usersSheet.getRange(1, HEADERS.users.length);
   if (!identityHeader.getValue()) identityHeader.setValue('DonorPersonID');
   if (identityHeader.getValue() !== 'DonorPersonID') throw new Error('The Users sheet needs an available DonorPersonID column.');
-  createRecord_(CONFIG.sheetNames.users, HEADERS.users, record, 'USR-', 'user', ['Name', 'Phone', 'Password']);
+  createRecord_(CONFIG.sheetNames.users, HEADERS.users, record, 'USR-', 'user', ['Name', 'Email', 'Password']);
   return {};
 }
 

@@ -421,11 +421,11 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
-  requestDonorOtp(phone: string) {
-    return apiFetch('requestDonorOtp', {}, { phone })
+  requestDonorOtp(email: string) {
+    return apiFetch('requestDonorOtp', {}, { email })
   },
-  activateDonor(phone: string, code: string, password: string) {
-    return apiFetch('activateDonor', {}, { phone, code, password })
+  activateDonor(email: string, code: string, password: string) {
+    return apiFetch('activateDonor', {}, { email, code, password })
   },
 
   async linkTransactionsToPerson(personID: string, transactions: Pick<Transaction, 'transactionID' | 'referenceID' | 'date' | 'amount'>[]) {

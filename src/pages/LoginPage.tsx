@@ -133,7 +133,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
           {isDonorMode && !CONFIG.useMockData && (
             <div className="mt-5 pt-4 border-t border-slate-100 text-center">
               <button type="button" disabled={busy} onClick={() => setShowActivation(true)} className="text-sm font-medium text-orange-700">
-                First time? Activate with mobile OTP
+                First time? Activate with email OTP
               </button>
             </div>
           )}
@@ -158,11 +158,11 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
           <AddUserForm onDone={() => setShowAddUser(false)} />
         </Modal>
         <Modal open={showActivation} onClose={() => setShowActivation(false)} title="Activate donor account">
-          {showActivation && <DonorActivationForm onDone={(phone) => {
-            setEmail(phone)
+          {showActivation && <DonorActivationForm onDone={(email) => {
+            setEmail(email)
             setPassword('')
             setError('')
-            setActivationNotice('Your account is ready. Sign in with your mobile number and new password.')
+            setActivationNotice('Your account is ready. Sign in with your email and new password.')
             setShowActivation(false)
           }} />}
         </Modal>
@@ -171,8 +171,8 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
   )
 }
 
-function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
-  const [phone, setPhone] = useState('')
+function DonorActivationForm({ onDone }: { onDone: (email: string) => void }) {
+  const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [awaitingCode, setAwaitingCode] = useState(false)
@@ -183,7 +183,7 @@ function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
     setBusy(true)
     setError('')
     try {
-      await dataService.requestDonorOtp(phone)
+      await dataService.requestDonorOtp(email)
       setCode('')
       setAwaitingCode(true)
     } catch (err) {
@@ -199,8 +199,8 @@ function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
     setBusy(true)
     setError('')
     try {
-      await dataService.activateDonor(phone, code, password)
-      onDone(phone)
+      await dataService.activateDonor(email, code, password)
+      onDone(email)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to activate your account.')
     } finally {
@@ -210,15 +210,15 @@ function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <Field label="Mobile number" hint="Use the number you gave when donating." required>
-        <Input type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} readOnly={awaitingCode} required />
+      <Field label="Email address" hint="Use the email address you gave when donating." required>
+        <Input type="email" autoComplete="email" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} readOnly={awaitingCode} required />
       </Field>
       {awaitingCode && (
         <>
           <p role="status" className="text-sm text-slate-600">
-            If this number is eligible, you’ll receive an SMS code valid for five minutes. If it doesn’t arrive, wait a minute before resending.
+            If this email address is eligible, you’ll receive an email code valid for five minutes. If it doesn’t arrive, wait a minute before resending.
           </p>
-          <Field label="SMS code" required>
+          <Field label="Email code" required>
             <Input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} required />
           </Field>
           <Field label="New password" hint="Use at least 15 characters." required>
@@ -231,13 +231,13 @@ function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
               setCode('')
               setPassword('')
               setError('')
-            }}>Change number</Button>
+            }}>Change email</Button>
           </div>
         </>
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <Button type="submit" className="w-full" disabled={busy}>
-        {busy ? 'Please wait…' : awaitingCode ? 'Activate account' : 'Send SMS code'}
+        {busy ? 'Please wait…' : awaitingCode ? 'Activate account' : 'Send email code'}
       </Button>
     </form>
   )
