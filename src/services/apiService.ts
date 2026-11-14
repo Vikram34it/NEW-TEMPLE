@@ -421,6 +421,13 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
+  requestDonorOtp(phone: string) {
+    return apiFetch('requestDonorOtp', {}, { phone })
+  },
+  activateDonor(phone: string, code: string, password: string) {
+    return apiFetch('activateDonor', {}, { phone, code, password })
+  },
+
   async linkTransactionsToPerson(personID: string, transactions: Pick<Transaction, 'transactionID' | 'referenceID' | 'date' | 'amount'>[]) {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) return apiFetch('linkTransactionsToPerson', {}, { personID, transactions })
     const ids = new Set(transactions.map((row) => row.transactionID))

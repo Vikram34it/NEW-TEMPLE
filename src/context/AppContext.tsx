@@ -47,7 +47,7 @@ function loadSessionUser(): User | null {
     const raw = storage.getItem(SESSION_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object' && parsed.userID && parsed.email) {
+    if (parsed && typeof parsed === 'object' && parsed.userID && (parsed.email || (parsed.role === 'donor' && parsed.phone))) {
       return parsed as User
     }
     return null

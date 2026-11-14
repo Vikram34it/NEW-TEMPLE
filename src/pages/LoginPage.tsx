@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { CONFIG } from '../config/apiConfig'
+import { dataService } from '../services/apiService'
 import { Button, Card, Field, Input, Modal, Select } from '../components/ui'
 import type { Role } from '../types'
 
@@ -32,6 +33,8 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAddUser, setShowAddUser] = useState(false)
+  const [showActivation, setShowActivation] = useState(false)
+  const [activationNotice, setActivationNotice] = useState('')
 
   if (user) return <Navigate to="/" replace />
 
@@ -79,7 +82,7 @@ export function LoginPage() {
               <button
                 key={m.key}
                 type="button"
-                onClick={() => setMode(m.key)}
+                onClick={() => { setMode(m.key); setError(''); setActivationNotice('') }}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
                   mode === m.key ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
@@ -90,6 +93,7 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {activationNotice && <p role="status" className="text-sm text-emerald-700">{activationNotice}</p>}
             {isDonorMode && (
               <p className="text-xs text-slate-500 bg-orange-50 border border-orange-200 rounded-lg p-2.5">
                 Donor? Sign in with the <strong>mobile number</strong> or email registered with the temple to view your donations and receipts.
@@ -147,9 +151,11 @@ export function LoginPage() {
               </button>
             </div>
           )}
-          {mode === 'donor' && (
-            <div className="mt-5 pt-4 border-t border-slate-100 text-center text-xs text-slate-400">
-              Don't have an account? Ask the temple admin to create your donor login.
+          {isDonorMode && !CONFIG.useMockData && (
+            <div className="mt-5 pt-4 border-t border-slate-100 text-center">
+              <button type="button" disabled={busy} onClick={() => setShowActivation(true)} className="text-sm font-medium text-orange-700">
+                First time? Activate with mobile OTP
+              </button>
             </div>
           )}
         </Card>
@@ -172,8 +178,89 @@ export function LoginPage() {
         <Modal open={showAddUser} onClose={() => setShowAddUser(false)} title="Add User">
           <AddUserForm onDone={() => setShowAddUser(false)} />
         </Modal>
+        <Modal open={showActivation} onClose={() => setShowActivation(false)} title="Activate donor account">
+          {showActivation && <DonorActivationForm onDone={(phone) => {
+            setEmail(phone)
+            setPassword('')
+            setError('')
+            setActivationNotice('Your account is ready. Sign in with your mobile number and new password.')
+            setShowActivation(false)
+          }} />}
+        </Modal>
       </div>
     </div>
+  )
+}
+
+function DonorActivationForm({ onDone }: { onDone: (phone: string) => void }) {
+  const [phone, setPhone] = useState('')
+  const [code, setCode] = useState('')
+  const [password, setPassword] = useState('')
+  const [awaitingCode, setAwaitingCode] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function requestCode() {
+    setBusy(true)
+    setError('')
+    try {
+      await dataService.requestDonorOtp(phone)
+      setCode('')
+      setAwaitingCode(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to request a code.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!awaitingCode) return requestCode()
+    setBusy(true)
+    setError('')
+    try {
+      await dataService.activateDonor(phone, code, password)
+      onDone(phone)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to activate your account.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <Field label="Mobile number" hint="Use the number you gave when donating." required>
+        <Input type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} readOnly={awaitingCode} required />
+      </Field>
+      {awaitingCode && (
+        <>
+          <p role="status" className="text-sm text-slate-600">
+            If this number is eligible, you’ll receive an SMS code valid for five minutes. If it doesn’t arrive, wait a minute before resending.
+          </p>
+          <Field label="SMS code" required>
+            <Input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} required />
+          </Field>
+          <Field label="New password" hint="Use at least 15 characters." required>
+            <Input type="password" autoComplete="new-password" minLength={15} maxLength={256} value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </Field>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="ghost" onClick={requestCode} disabled={busy}>Resend code</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => {
+              setAwaitingCode(false)
+              setCode('')
+              setPassword('')
+              setError('')
+            }}>Change number</Button>
+          </div>
+        </>
+      )}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <Button type="submit" className="w-full" disabled={busy}>
+        {busy ? 'Please wait…' : awaitingCode ? 'Activate account' : 'Send SMS code'}
+      </Button>
+    </form>
   )
 }
 
