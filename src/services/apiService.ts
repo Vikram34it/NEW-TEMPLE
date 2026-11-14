@@ -62,31 +62,50 @@ export interface ResetRunResult extends ResetPreviewResult {
   success: boolean
 }
 
-// Optional token sent to the backend (e.g. the API_KEY from Apps Script).
-// Configure it via an environment variable at build time where appropriate.
-const TOKEN = import.meta.env.VITE_API_TOKEN || ''
+const SESSION_TOKEN_KEY = 'temple_session_token'
+let sessionToken = ''
+try {
+  sessionToken = window.sessionStorage.getItem(SESSION_TOKEN_KEY) || ''
+} catch {
+  // The current tab can still sign in if storage is blocked.
+}
+
+export function hasLiveSession() {
+  return Boolean(sessionToken)
+}
+
+function setSessionToken(token: string) {
+  sessionToken = token
+  try {
+    if (token) window.sessionStorage.setItem(SESSION_TOKEN_KEY, token)
+    else window.sessionStorage.removeItem(SESSION_TOKEN_KEY)
+  } catch {
+    // Keep the in-memory session.
+  }
+}
 
 async function apiFetch(path: string, params: Record<string, string> = {}, body?: unknown) {
   if (!CONFIG.webAppUrl) {
     throw new Error('API not configured')
   }
-  const qs = new URLSearchParams(params).toString()
-  const url = `${CONFIG.webAppUrl}?action=${path}${qs ? `&${qs}` : ''}${TOKEN ? `&token=${TOKEN}` : ''}`
+  const token = path === 'login' ? '' : sessionToken
   // Never let a slow or hung backend block the app forever - abort and fail
   // after REQUEST_TIMEOUT_MS so the UI can render instead of spinning.
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
-    const res = await fetch(url, body
-      ? {
-          method: 'POST',
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        }
-      : { signal: controller.signal })
+    const res = await fetch(CONFIG.webAppUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: path, params, body, session: token }),
+      signal: controller.signal,
+    })
     if (!res.ok) throw new Error(`API error ${res.status}`)
     const json = await res.json()
     if (json.success === false) {
+      if (json.code === 'SESSION_EXPIRED' && token && token === sessionToken) {
+        setSessionToken('')
+        window.dispatchEvent(new Event('temple-session-expired'))
+      }
       throw new Error(json.message || 'API request failed')
     }
     return json.data
@@ -276,7 +295,7 @@ export function reconcileMockLedger() {
       type: 'income',
       incomeOrExpense: 'income',
       amount: d.amount,
-      account: accountNameForPaymentMethod(d.paymentMethod, accounts),
+      account: accounts.find((a) => a.accountID === d.accountID)?.accountName ?? accountNameForPaymentMethod(d.paymentMethod, accounts),
       referenceID: d.donationID,
       description: `Donation - ${d.donorName || ''}`,
       createdBy: d.receivedBy || 'system',
@@ -290,7 +309,7 @@ export function reconcileMockLedger() {
       type: 'expense',
       incomeOrExpense: 'expense',
       amount: e.amount,
-      account: accountNameForPaymentMethod(e.paymentMethod, accounts),
+      account: accounts.find((a) => a.accountID === e.accountID)?.accountName ?? accountNameForPaymentMethod(e.paymentMethod, accounts),
       referenceID: e.expenseID,
       description: `Expense - ${e.description || ''}`,
       createdBy: e.paidBy || 'system',
@@ -427,6 +446,7 @@ export const dataService = {
   async bulkPersist(record: RecordName, items: Array<Record<string, unknown>>): Promise<unknown> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
       const action = record === 'donations' ? 'bulkCreateDonations'
+        : record === 'expenses' ? 'bulkCreateExpenses'
         : record === 'transactions' ? 'bulkCreateTransactions'
         : null
       if (!action) throw new Error('Bulk create not supported for: ' + record)
@@ -435,8 +455,12 @@ export const dataService = {
     }
     // Mock mode: create each record individually
     const results: unknown[] = []
+    const keys = new Set((mockStore.data[record] as Array<{ bankImportKey?: string }>).map((item) => item.bankImportKey))
     for (const item of items) {
+      const key = typeof item.bankImportKey === 'string' ? item.bankImportKey : ''
+      if (key && keys.has(key)) continue
       results.push(await api.mutate(record, 'create', item))
+      if (key) keys.add(key)
     }
     return results
   },
@@ -471,11 +495,11 @@ export const dataService = {
   // DANGEROUS: wipe ALL entered donations/expenses/payments/transactions,
   // reset balances to OpeningBalance and restart the receipt counter at 0001.
   // Gated by the reset password and confirm:'RESET' on the backend.
-  async resetAllTransactions(resetKey: string, userEmail: string): Promise<ResetRunResult> {
+  async resetAllTransactions(resetKey: string): Promise<ResetRunResult> {
     if (CONFIG.useMockData || !CONFIG.webAppUrl) {
       return { success: true, removed: { donations: 0, expenses: 0, payments: 0, transactions: 0 }, total: 0 }
     }
-    return (await apiFetch('resetAllTransactions', {}, { resetKey, confirm: 'RESET', userEmail })) as ResetRunResult
+    return (await apiFetch('resetAllTransactions', {}, { resetKey, confirm: 'RESET' })) as ResetRunResult
   },
 
   // Persist settings (backend or mock).
@@ -699,9 +723,18 @@ export const dataService = {
     else item.deletedByRecipient = true
   },
 
+  async logout(): Promise<void> {
+    if (!sessionToken) return
+    const request = apiFetch('logout')
+    setSessionToken('')
+    await request
+  },
+
   async login(identifier: string, password: string): Promise<User> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      const res = (await apiFetch('login', {}, { identifier, password })) as { user: User }
+      const res = (await apiFetch('login', {}, { identifier, password })) as { user: User; token: string }
+      if (!res.token) throw new Error('Update the Apps Script deployment before signing in.')
+      setSessionToken(res.token)
       return res.user
     }
     const users = mockStore.data.users as User[]

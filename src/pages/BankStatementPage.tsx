@@ -8,6 +8,7 @@ import type { Donation, Expense, Person } from '../types'
 
 interface PreviewRow extends BankStatementRow {
   key: string
+  importIdentity: string
   include: boolean
   account: string
   donorName: string
@@ -53,7 +54,7 @@ export function BankStatementPage() {
   )
 
   const defaultAccount = useMemo(
-    () => accounts.find((a) => a.type === 'bank')?.accountName ?? accounts[0]?.accountName ?? 'Main Bank Account',
+    () => accounts.find((a) => a.type === 'bank')?.accountID ?? accounts[0]?.accountID ?? '',
     [accounts],
   )
 
@@ -90,15 +91,22 @@ export function BankStatementPage() {
       const account = defaultAccount
       // The statement's "Donor Name" column (when present) pre-fills the editable
       // text field so each credit is already tagged; users can correct it freely.
+      const occurrences = new Map<string, number>()
       setRows(
-        parsed.map((r, i) => ({
-          ...r,
-          key: `row-${i}`,
-          include: true,
-          account,
-          donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
-          remark: (r.remark || '').trim(),
-        })),
+        parsed.map((r, i) => {
+          const identity = JSON.stringify([r.date, r.type, r.amount, r.reference, r.description])
+          const occurrence = (occurrences.get(identity) ?? 0) + 1
+          occurrences.set(identity, occurrence)
+          return {
+            ...r,
+            key: `row-${i}`,
+            include: true,
+            account,
+            donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
+            remark: (r.remark || '').trim(),
+            importIdentity: JSON.stringify([identity, occurrence]),
+          }
+        }),
       )
       setAllAccount(account)
       setFileName(file.name)
@@ -134,6 +142,7 @@ export function BankStatementPage() {
   const importRows = async () => {
     const selected = (rows || []).filter((r) => r.include && r.date && r.amount > 0)
     if (selected.length === 0) return
+    setError('')
     setImporting(true)
     try {
       // All income rows become proper donation records (receipts, donor
@@ -151,16 +160,26 @@ export function BankStatementPage() {
       const donorsByName = new Map(donors.map((d) => [normalize(d.name), d]))
 
       const paymentMethodFor = (r: PreviewRow): Expense['paymentMethod'] => {
-        const acct = accounts.find((a) => a.accountName === r.account)
+        const acct = accounts.find((a) => a.accountID === r.account)
         if (acct?.type === 'cash') return 'Cash'
         return paymentMethodFromDescription(r.description)
       }
 
-      for (const r of selected) {
+      const importFields = await Promise.all(selected.map(async (row) => {
+        if (!accounts.some((account) => account.accountID === row.account)) {
+          throw new Error('Choose a valid account for each selected row.')
+        }
+        const identity = new TextEncoder().encode(JSON.stringify([row.account, row.importIdentity]))
+        const hash = await crypto.subtle.digest('SHA-256', identity)
+        const bankImportKey = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+        return { accountID: row.account, bankImportKey }
+      }))
+      for (const [index, r] of selected.entries()) {
         if (r.type === 'income') {
           const typedName = (r.donorName || '').trim()
           const donor = donorsByName.get(normalize(typedName))
           donations.push({
+            ...importFields[index],
             date: r.date,
             donorID: donor ? donor.personID : '',
             donorName: typedName || (donor ? donor.name : 'Unknown Donor'),
@@ -170,13 +189,14 @@ export function BankStatementPage() {
             amount: r.amount,
             category: 'General Donation',
             purpose: '',
-            paymentMethod: paymentMethodFromDescription(r.description),
+            paymentMethod: paymentMethodFor(r),
             transactionReference: r.reference || '',
             receivedBy: user?.name || '',
             notes: '',
           })
         } else {
           expenses.push({
+            ...importFields[index],
             date: r.date,
             category: isFixedDeposit(r.description, r.remark) ? 'Fixed Deposit' : 'Other',
             description: (r.remark || '').trim() || r.description || 'Bank debit',
@@ -277,7 +297,7 @@ export function BankStatementPage() {
               <p className="text-xs text-slate-500">Book untagged rows to account</p>
               <Select value={allAccount} onChange={(e) => applyAccountToAll(e.target.value)} className="mt-1.5">
                 {accounts.map((a) => (
-                  <option key={a.accountID} value={a.accountName}>{a.accountName}</option>
+                  <option key={a.accountID} value={a.accountID}>{a.accountName}</option>
                 ))}
               </Select>
               <div className="mt-2">

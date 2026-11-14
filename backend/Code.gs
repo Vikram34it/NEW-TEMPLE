@@ -1,56 +1,4 @@
-/**
- * ============================================================================
- * ISKCON TEMPLE MANAGEMENT SYSTEM - GOOGLE APPS SCRIPT BACKEND
- * ============================================================================
- *
- * This Apps Script acts as the API between your React app (hosted on GitHub
- * Pages) and your Google Sheets database.
- *
- * ✅ FULLY AUTOMATED SETUP - no manual spreadsheet work required:
- *
- *   1. Inside your blank Google Spreadsheet: Extensions > Apps Script.
- *   2. Paste this whole file into Code.gs and save.
- *   3. Open your spreadsheet once (or run "installAutomation" from the
- *      function dropdown). onOpen() automatically:
- *          - creates all 11 sheets with the correct headers
- *          - seeds default accounts, example projects, and demo users
- *          - writes SPREADSHEET_ID to Script Properties
- *          - generates a secret API_KEY and stores it in Script Properties
- *   4. Deploy > New deployment > Web app:
- *        - Execute as: Me
- *        - Who has access: your choice (see SECURITY note below)
- *   5. Copy the Web App URL into frontend config (.env.local):
- *        VITE_WEB_APP_URL = <the Web App URL>
- *        VITE_USE_MOCK    = false
- *        VITE_API_TOKEN   = the API_KEY logged by setup (or run getApiKeyNow())
- *
- * The backend is self-healing: if a sheet is ever missing, it is recreated
- * automatically on the next request, so nothing in the frontend breaks.
- *
- * SECURITY NOTE (very important):
- *   A plain Google Apps Script Web App deployed as "Anyone" is NOT a secure
- *   authentication boundary - ANYONE with the URL can call it. Therefore:
- *
- *   - Require an API_KEY: pass it as a query/header parameter (token) on every
- *     request. Frontend never makes money decisions on its own; the backend
- *     rejects requests without a valid token.
- *   - Role checks are ENFORCED HERE in the backend, not just in the UI. The
- *     frontend role buttons are cosmetic; the backend is the source of truth.
- *   - Never hard-code the spreadsheet ID, API key, or any credential in the
- *     React (public) code. Keep them in Script Properties.
- *   - For truly sensitive data, consider Google Identity Platform or a proper
- *     backend. GitHub Pages cannot keep secrets - it is a static host, so the
- *     "secret" of the system is the API key which lives only on the server
- *     (Apps Script side) and should NEVER be bundled in the client.
- *       -> If the API key would have to be in the client to work, then it is
- *          not a real secret. Prefer a per-user token, or restrict access by
- *          IP / Google account. Evaluate your risk and deploy responsibly.
- *
- * BEST PRACTICE: keep the spreadsheet private and only share it with the Apps
- * Script service account / yourself. Restrict access in the Web App deployment
- * to known Google accounts if your users have Google accounts.
- * ============================================================================
- */
+/** ISKCON Temple Management API. Browser requests use per-user sessions. */
 
 var CONFIG = {
   sheetNames: {
@@ -74,6 +22,7 @@ var CONFIG = {
   },
 };
 
+var requestActor_ = '';
 var scriptProperties = PropertiesService.getScriptProperties();
 
 /*
@@ -137,6 +86,7 @@ function ensureSheet_(ss, nameOrKey) {
   if (!sh) sh = ss.insertSheet(title);
   var headers = HEADERS[key];
   if (headers) {
+    ensureColumnCapacity_(sh, headers.length);
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   }
@@ -188,33 +138,11 @@ function installAutomation() {
   Logger.log('Automation installed. Setup is complete.');
 }
 
-/* Run this from the function dropdown to view the generated API key. */
-function getApiKeyNow() {
-  var key = getApiKey_();
-  Logger.log('API_KEY = ' + key);
-  // Also show it in a dialog.
-  SpreadsheetApp.getUi().alert('API Key (keep secret):\n\n' + key);
-  return key;
-}
-
-/* Auto-generate and return the backend API key (stored in Script Properties). */
-function getApiKey_() {
-  var key = scriptProperties.getProperty('API_KEY');
-  if (!key) {
-    key = generateApiKey_(48);
-    scriptProperties.setProperty('API_KEY', key);
-  }
-  return key;
-}
-
-/* Auto-generate and return the SEPARATE reset key (stored in Script
- * Properties). This is deliberately NOT the API key: every web reset call
- * must also present this key, so a leaked API key alone can never wipe the
- * books. Used only by the Settings → Danger Zone action in the app. */
+/* Separate owner-managed password for transaction resets. */
 function getResetKey_() {
   var key = scriptProperties.getProperty('RESET_KEY');
   if (!key) {
-    key = generateApiKey_(24);
+    key = randomToken_();
     scriptProperties.setProperty('RESET_KEY', key);
   }
   return key;
@@ -224,25 +152,14 @@ function getResetKey_() {
  * password for the app's "Reset All Transactions" button in Settings. */
 function getResetKeyNow() {
   var key = getResetKey_();
-  Logger.log('RESET_KEY = ' + key);
   try {
     SpreadsheetApp.getUi().alert('Reset Key (keep secret):\n\n' + key);
-  } catch (e) { /* headless: the Logger line above is enough */ }
+  } catch (e) { throw new Error('Open the bound spreadsheet before viewing the reset key.'); }
   return key;
 }
 
-function generateApiKey_(len) {
-  var arr = new Uint8Array(len);
-  // Use the crypto API if available.
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(arr);
-  } else {
-    for (var i = 0; i < len; i++) arr[i] = Math.floor(Math.random() * 256);
-  }
-  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  var out = '';
-  for (var j = 0; j < arr.length; j++) out += chars[arr[j] % chars.length];
-  return out;
+function randomToken_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
 }
 
 /* ==========================================================================
@@ -253,8 +170,8 @@ function generateApiKey_(len) {
 var HEADERS = {
   users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password', 'Phone'],
   people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes', 'Birthday', 'Anniversary', 'PreferredChannel', 'PANNumber', 'AadhaarNumber'],
-  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted'],
-  expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted'],
+  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey'],
+  expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey'],
   vendors: ['VendorID', 'CompanyName', 'ContactPerson', 'Phone', 'Email', 'Address', 'ServiceType', 'GSTNumber', 'BankDetails', 'Notes'],
   projects: ['ProjectID', 'ProjectName', 'Description', 'StartDate', 'EstimatedBudget', 'ActualExpense', 'Status', 'Contractor'],
   payments: ['PaymentID', 'Date', 'PersonOrVendor', 'AmountDue', 'AmountPaid', 'RemainingAmount', 'DueDate', 'Project', 'Status', 'Notes'],
@@ -283,96 +200,202 @@ function doPost(e) {
 }
 
 function handleRequest_(e, method) {
-  // CORS headers so the browser (GitHub Pages) may call this Web App.
-  var output = ContentService.createTextOutput();
-  output.setMimeType(ContentService.MimeType.JSON);
-
+  var output = ContentService.createTextOutput().setMimeType(ContentService.MimeType.JSON);
+  var lock;
+  function reply(result) { return output.setContent(JSON.stringify(result)); }
   try {
-    // ---- API key / token validation ----
-    if (!authorize_(e)) {
-      output.setContent(JSON.stringify({ success: false, message: 'Unauthorized' }));
-      return output;
+    if (method !== 'POST' || !e || !e.postData) throw new Error('POST required');
+    var request = JSON.parse(e.postData.contents);
+    var action = request.action;
+    if (typeof action !== 'string') throw new Error('Invalid action');
+    var body = request.body || {};
+    var read = Boolean(READ_ROLES_[action]);
+    if (!read) {
+      lock = LockService.getScriptLock();
+      lock.waitLock(20000);
     }
-
-    // Query params are available for both GET and POST (action & token are sent
-    // as query parameters by the frontend for every request).
-    var params = (e && e.parameter) || {};
-    var body = {};
-    if (method === 'POST' && e && e.postData && e.postData.contents) {
-      try { body = JSON.parse(e.postData.contents); } catch (err) { body = {}; }
+    if (action === 'login') {
+      var signedIn = login_(body);
+      SpreadsheetApp.flush();
+      return reply({ success: true, data: signedIn });
     }
-
-    var action = params.action || body.action || 'getDashboardData';
-    var result = route_(action, params, body, method);
-    output.setContent(JSON.stringify({ success: true, data: result }));
+    var user = sessionUser_(request.session);
+    if (!user) return reply({ success: false, code: 'SESSION_EXPIRED', message: 'Please sign in again.' });
+    requestActor_ = user.Email;
+    if (action === 'logout') {
+      CacheService.getScriptCache().remove(sessionKey_(request.session));
+      return reply({ success: true });
+    }
+    authorizeAction_(action, user);
+    var data = route_(action, request.params || {}, body, user);
+    if (lock) SpreadsheetApp.flush();
+    return reply({ success: true, data: data });
   } catch (err) {
-    output.setContent(JSON.stringify({ success: false, message: String(err) }));
+    return reply({ success: false, message: err.message || 'Request failed' });
+  } finally {
+    requestActor_ = '';
+    if (lock && lock.hasLock()) {
+      try { SpreadsheetApp.flush(); } catch (flushError) { console.error(flushError); }
+      lock.releaseLock();
+    }
   }
-  return output;
 }
 
-function authorize_(e) {
-  // Auto-generate the key on first use so deployment "just works", but still
-  // require it on every request (fail-closed).
-  var apiKey = getApiKey_();
-  if (!apiKey) return false;
-  var token =
-    (e && e.parameter && e.parameter.token) ||
-    (e && e.parameter && e.parameter.apiKey) ||
-    (e && e.headers && e.headers.Authorization) ||
-    (e && e.postData && e.postData && tryParseToken_(e.postData.contents)) ||
-    '';
-  if (token.indexOf('Bearer ') === 0) token = token.substring(7);
-  return token === apiKey;
+var READ_ROLES_ = Object.create(null);
+[
+  ['admin accountant manager viewer donor', 'getDonations donations getSettings settings'],
+  ['admin accountant manager viewer', 'getUsers users getPeople people getExpenses expenses getVendors vendors getProjects projects getDashboardData getReports getAnnouncements announcements getMessages messages getEvents events getEventVolunteers eventVolunteers getRequests requests'],
+  ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
+  ['admin accountant', 'getTransactions transactions'],
+  ['admin', 'getAuditLog auditLog'],
+].forEach(function (group) {
+  group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
+});
+
+var WRITE_ROLES_ = Object.create(null);
+[
+  ['admin accountant manager viewer', 'sendMessage markMessageRead deleteMessage'],
+  ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
+  ['admin manager', 'createPerson updatePerson deletePerson createVendor updateVendor deleteVendor'],
+  ['admin accountant', 'createDonation bulkCreateDonations updateDonation createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
+  ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
+].forEach(function (group) {
+  group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
+});
+
+function authorizeAction_(action, user) {
+  var roles = READ_ROLES_[action] || WRITE_ROLES_[action] || [];
+  if (roles.indexOf(user.Role) === -1) throw new Error('Permission denied');
 }
 
-function tryParseToken_(contents) {
-  try {
-    var obj = JSON.parse(contents);
-    return obj.token || obj.apiKey || '';
-  } catch (err) { return ''; }
+function digest_(value) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value));
 }
 
-/* ==========================================================================
- * ROUTER
- * ========================================================================== */
+function sessionKey_(token) { return 'session:' + digest_(token); }
 
-function route_(action, params, body, method) {
+function sessionUser_(token) {
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token)) return null;
+  var entry = CacheService.getScriptCache().get(sessionKey_(token));
+  if (!entry) return null;
+  var session = JSON.parse(entry);
+  return readAll_(CONFIG.sheetNames.users, HEADERS.users).find(function (user) {
+    return String(user.UserID) === session.id && user.Status === 'active' &&
+      digest_(String(user.Password)) === session.credential;
+  }) || null;
+}
+
+function safeUserRows_(user) {
+  return readAll_(CONFIG.sheetNames.users, HEADERS.users).filter(function (row) {
+    return user.Role === 'admin' || (row.Role !== 'donor' && row.Status === 'active');
+  }).map(function (row) {
+    return { UserID: row.UserID, Name: row.Name, Email: row.Email, Role: row.Role,
+      Status: row.Status, CreatedDate: row.CreatedDate, Phone: user.Role === 'admin' ? row.Phone : '' };
+  });
+}
+
+function donationsFor_(user) {
+  if (user.Role !== 'donor') return readDonations_().map(function (row) {
+    if (user.Role === 'viewer' || user.Role === 'manager') {
+      ['PANNumber', 'AadhaarNumber', 'BankImportKey'].forEach(function (key) { delete row[key]; });
+      if (user.Role === 'viewer') ['Phone', 'Email', 'Address', 'Notes'].forEach(function (key) { delete row[key]; });
+    }
+    return row;
+  });
+  var email = String(user.Email || '').trim();
+  if (!email && !normalizePhone_(user.Phone)) return [];
+  return readDonations_(email, user.Phone);
+}
+
+function peopleFor_(user) {
+  return readAll_(CONFIG.sheetNames.people, HEADERS.people).map(function (person) {
+    if (user.Role === 'manager' || user.Role === 'viewer') {
+      delete person.PANNumber;
+      delete person.AadhaarNumber;
+    }
+    return person;
+  });
+}
+
+function settingsFor_(user) {
+  var settings = getSettings_();
+  if (user.Role === 'admin') return settings;
+  var keys = ['templeName', 'templeAddress', 'templePhone', 'templeEmail', 'receiptPrefix',
+    'currentSequence', 'defaultBankAccount', 'currency', 'smsProvider', 'waPhoneNumberId', 'waTemplateName'];
+  var publicSettings = {};
+  keys.forEach(function (key) { publicSettings[key] = settings[key]; });
+  return publicSettings;
+}
+
+function safeAuditLog_() {
+  return readAll_(CONFIG.sheetNames.audit, HEADERS.audit).map(function (row) {
+    if (/^(user|users|settings)$/i.test(row.Module)) {
+      row.OldValue = '';
+      row.NewValue = '';
+    }
+    return row;
+  });
+}
+
+function modifyMessage_(action, body, user) {
+  var email = String(user.Email || '').trim().toLowerCase();
+  if (!email) throw new Error('An email address is required');
+  if (action === 'sendMessage') {
+    var message = body.record || {};
+    return createRecord_(CONFIG.sheetNames.messages, HEADERS.messages, {
+      SenderEmail: email, SenderName: user.Name, RecipientEmail: message.RecipientEmail,
+      Subject: message.Subject, Body: message.Body,
+    }, 'MSG-', 'message', ['RecipientEmail', 'Subject', 'Body']);
+  }
+  var id = action === 'deleteMessage' ? body.id : body.record && body.record.MessageID;
+  var message = getMessages_(email).find(function (row) { return String(row.MessageID) === String(id); });
+  var side = action === 'deleteMessage' ? body.side : 'recipient';
+  var owner = message && (side === 'sender' ? message.SenderEmail : message.RecipientEmail);
+  if ((side !== 'sender' && side !== 'recipient') || String(owner || '').trim().toLowerCase() !== email) {
+    throw new Error('Permission denied');
+  }
+  if (action === 'deleteMessage') return deleteMessage_(id, email, side);
+  return updateRecord_(CONFIG.sheetNames.messages, HEADERS.messages, {
+    MessageID: id, Read: true, ReadAt: new Date().toISOString(),
+  }, 'MessageID');
+}
+
+function route_(action, params, body, user) {
   switch (action) {
     // --- Reads ---
-    case 'getUsers': return readAll_(CONFIG.sheetNames.users, HEADERS.users);
-    case 'getPeople': return readAll_(CONFIG.sheetNames.people, HEADERS.people);
-    case 'getDonations': return readDonations_(params.me || (body && body.me), params.mob || (body && body.mob));
+    case 'getUsers': return safeUserRows_(user);
+    case 'getPeople': return peopleFor_(user);
+    case 'getDonations': return donationsFor_(user);
     case 'getExpenses': return readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
     case 'getVendors': return readAll_(CONFIG.sheetNames.vendors, HEADERS.vendors);
     case 'getProjects': return readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
     case 'getPayments': return readAll_(CONFIG.sheetNames.payments, HEADERS.payments);
     case 'getAccounts': return readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
     case 'getTransactions': return readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
-    case 'getSettings': return getSettings_();
+    case 'getSettings': return settingsFor_(user);
     case 'getDashboardData': return buildDashboard_();
-    case 'getReports': return getReports_(params);
-    case 'getAuditLog': return readAll_(CONFIG.sheetNames.audit, HEADERS.audit);
+    case 'getReports': return getReports_(params, user);
+    case 'getAuditLog': return safeAuditLog_();
     case 'getAnnouncements': return readAll_(CONFIG.sheetNames.announcements, HEADERS.announcements);
-    case 'getMessages': return getMessages_(params.me || (body && body.me) || '');
+    case 'getMessages': return getMessages_(user.Email);
     case 'getEvents': return readAll_(CONFIG.sheetNames.events, HEADERS.events);
     case 'getEventVolunteers': return readAll_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers);
     case 'getRequests': return readAll_(CONFIG.sheetNames.requests, HEADERS.requests);
 
     // --- Aliases: the frontend sends the bare lowercase record name for reads.
-    case 'users': return readAll_(CONFIG.sheetNames.users, HEADERS.users);
-    case 'people': return readAll_(CONFIG.sheetNames.people, HEADERS.people);
-    case 'donations': return readDonations_(params.me || (body && body.me), params.mob || (body && body.mob));
+    case 'users': return safeUserRows_(user);
+    case 'people': return peopleFor_(user);
+    case 'donations': return donationsFor_(user);
     case 'expenses': return readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
     case 'vendors': return readAll_(CONFIG.sheetNames.vendors, HEADERS.vendors);
     case 'projects': return readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
     case 'pendingPayments': return readAll_(CONFIG.sheetNames.payments, HEADERS.payments);
     case 'accounts': return readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
     case 'transactions': return readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
-    case 'settings': return getSettings_();
-    case 'auditLog': return readAll_(CONFIG.sheetNames.audit, HEADERS.audit);
+    case 'settings': return settingsFor_(user);
+    case 'auditLog': return safeAuditLog_();
     case 'announcements': return readAll_(CONFIG.sheetNames.announcements, HEADERS.announcements);
-    case 'messages': return getMessages_(params.me || (body && body.me) || '');
+    case 'messages': return getMessages_(user.Email);
     case 'events': return readAll_(CONFIG.sheetNames.events, HEADERS.events);
     case 'eventVolunteers': return readAll_(CONFIG.sheetNames.eventVolunteers, HEADERS.eventVolunteers);
     case 'requests': return readAll_(CONFIG.sheetNames.requests, HEADERS.requests);
@@ -385,6 +408,7 @@ function route_(action, params, body, method) {
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
 
     case 'createExpense': return createRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'EXP-', 'expense', ['Description', 'Amount']);
+    case 'bulkCreateExpenses': return bulkCreateRecords_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.records, 'EXP-', 'expense', ['Description', 'Amount']);
     case 'updateExpense': return updateRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'ExpenseID');
     case 'softDeleteExpense': return softDeleteRecord_(CONFIG.sheetNames.expenses, 'ExpenseID', body.id);
 
@@ -405,8 +429,18 @@ function route_(action, params, body, method) {
     case 'createAccount': return createRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, body.record, 'ACC-', 'account', ['AccountName']);
     case 'updateAccount': return updateRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, body.record, 'AccountID');
 
-    case 'createUser': return createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user', ['Name', 'Email', 'Password']);
-    case 'updateUser': return updateRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'UserID');
+    case 'createUser':
+      prepareUserWrite_(body.record, true);
+      body.record.CreatedDate = new Date().toISOString().slice(0, 10);
+      var createdUser = createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user', ['Name', 'Email', 'Password']);
+      delete createdUser.Password;
+      return createdUser;
+      prepareUserWrite_(body.record, true);
+      createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user', ['Name', 'Email', 'Password']);
+      return { success: true };
+    case 'updateUser':
+      prepareUserWrite_(body.record, false);
+      return updateRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'UserID');
     case 'deleteUser': return hardDeleteRecord_(CONFIG.sheetNames.users, 'UserID', body.id);
 
     case 'createTransaction': return createRecord_(CONFIG.sheetNames.transactions, HEADERS.transactions, body.record, 'TXN-', 'transaction', []);
@@ -418,10 +452,9 @@ function route_(action, params, body, method) {
     // destructive one additionally requires confirm:'RESET'. See the
     // FULL RESET section below.
     case 'resetAllTransactionsPreview': return resetPreviewWeb_(body);
-    case 'resetAllTransactions': return resetAllWeb_(body);
+    case 'resetAllTransactions': return resetAllWeb_(body, user.Email);
 
     case 'updateSettings': return updateSettings_(body.settings);
-    case 'login': return login_(body);
 
     // --- Community: announcements ---
     case 'createAnnouncement': return createRecord_(CONFIG.sheetNames.announcements, HEADERS.announcements, body.record, 'ANN-', 'announcement', ['Title']);
@@ -429,9 +462,9 @@ function route_(action, params, body, method) {
     case 'archiveAnnouncement': return softDeleteRecord_(CONFIG.sheetNames.announcements, 'AnnouncementID', body.id);
 
     // --- Community: messages ---
-    case 'sendMessage': return createRecord_(CONFIG.sheetNames.messages, HEADERS.messages, body.record, 'MSG-', 'message', ['RecipientEmail', 'Subject', 'Body']);
-    case 'markMessageRead': return updateRecord_(CONFIG.sheetNames.messages, HEADERS.messages, body.record, 'MessageID');
-    case 'deleteMessage': return deleteMessage_(body.id, body.email, body.side);
+    case 'sendMessage':
+    case 'markMessageRead':
+    case 'deleteMessage': return modifyMessage_(action, body, user);
 
     // --- Community: events + volunteers ---
     case 'createEvent': return createRecord_(CONFIG.sheetNames.events, HEADERS.events, body.record, 'EVT-', 'event', ['Title', 'Date']);
@@ -460,7 +493,6 @@ function route_(action, params, body, method) {
     case 'campaigns': return readAll_(CONFIG.sheetNames.campaigns, HEADERS.campaigns);
     case 'scheduleBulkCampaign': return scheduleBulkCampaign_(body);
     case 'cancelBulkCampaign': return cancelBulkCampaign_(body);
-    case 'processPendingCampaigns': return processPendingCampaigns();
     case 'resyncLedger': return runResyncLedger();
 
     default:
@@ -952,11 +984,12 @@ function tableData_(sheetName, headers) {
   var sheet = sheet_(sheetName);
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  var values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  var width = Math.min(headers.length, sheet.getMaxColumns());
+  var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
   return values.map(function (row) {
     var obj = {};
     for (var i = 0; i < headers.length; i++) {
-      obj[headers[i]] = row[i];
+      obj[headers[i]] = i < width ? row[i] : '';
     }
     return obj;
   });
@@ -985,7 +1018,7 @@ function readDonations_(meEmail, mobPhone) {
   var mobNorm = mobPhone ? normalizePhone_(mobPhone) : '';
   if (!meNorm && !mobNorm) return donations;
   return donations.filter(function (d) {
-    if (meNorm && String(d.Email || '').toLowerCase() === meNorm) return true;
+    if (meNorm && String(d.Email || '').trim().toLowerCase() === meNorm) return true;
     if (mobNorm) {
       var dPhone = String(d.Phone || '');
       if (dPhone && normalizePhone_(dPhone) === mobNorm) return true;
@@ -1037,6 +1070,7 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   validateRecord_(record, required || []);
 
   var sheet = sheet_(sheetName);
+  ensureColumnCapacity_(sheet, headers.length);
   var idCol = headers[0]; // first column is always the ID
   var id = nextIdFor_(sheetName, idCol, prefix);
 
@@ -1080,13 +1114,15 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
 
   var row = [];
   for (var i = 0; i < headers.length; i++) {
-    var val = record[headers[i]];
+    var field = headers[i];
+    var val = isLedgerSheet_(sheetName) && (field === 'BankImportKey' || field === 'AccountID')
+      ? '' : sheetValue_(record[field]);
     if (headers[i] === idCol) val = id;
     row.push(val === undefined ? '' : val);
   }
   sheet.appendRow(row);
 
-  audit_(module, 'Create', id, '', JSON.stringify(record));
+  audit_(module, 'Create', id, '', module === 'user' ? '' : JSON.stringify(record));
 
   if (isBalanceSheet_(sheetName)) resyncLedger_();
   return readRowById_(sheetName, headers, idCol, id, row, sheet.getLastRow());
@@ -1102,6 +1138,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   }
 
   var sheet = sheet_(sheetName);
+  ensureColumnCapacity_(sheet, headers.length);
   var idCol = headers[0];
   var now = new Date().toISOString();
 
@@ -1119,9 +1156,14 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     used[val] = true;
   });
 
+  var importKeys = Object.create(null);
+  data.forEach(function (row) { if (row.BankImportKey) importKeys[row.BankImportKey] = true; });
+  var importAccounts = records.some(function (record) { return record && record.BankImportKey; })
+    ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
+
   // 2. Generate all IDs sequentially without re-reading the sheet.
   var rows = [];
-  var created = [];
+  var accepted = [];
   var receiptPrefix = null;
   if (module === 'donation') {
     receiptPrefix = String(getSettings_().receiptPrefix || 'REC');
@@ -1130,6 +1172,17 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   for (var i = 0; i < records.length; i++) {
     var record = records[i];
     validateRecord_(record, required || []);
+    if (record.BankImportKey) {
+      if (Number(record.Amount) <= 0) throw new Error('Bank import amount must be positive');
+      if (module !== 'donation' && module !== 'expense') throw new Error('Invalid bank import type');
+      if (!/^[a-f0-9]{64}$/.test(record.BankImportKey)) throw new Error('Invalid bank import key');
+      if (importKeys[record.BankImportKey]) continue;
+      if (!importAccounts.some(function (account) { return String(account.AccountID) === String(record.AccountID); })) {
+        throw new Error('Bank import account no longer exists');
+      }
+      importKeys[record.BankImportKey] = true;
+    }
+    accepted.push(record);
 
     // Generate unique ID
     max += 1;
@@ -1153,7 +1206,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     // Build the row array matching header order
     var row = [];
     for (var h = 0; h < headers.length; h++) {
-      var val = record[headers[h]];
+      var val = sheetValue_(record[headers[h]]);
       if (headers[h] === idCol) val = id;
       row.push(val === undefined ? '' : val);
     }
@@ -1163,6 +1216,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   // 3. Append all rows at once (single spreadsheet write instead of N writes).
   if (rows.length > 0) {
     var startRow = sheet.getLastRow() + 1;
+    ensureRowCapacity_(sheet, startRow + rows.length - 1);
     sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
   }
 
@@ -1171,15 +1225,16 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     var auditSheet = sheet_(CONFIG.sheetNames.audit);
     var auditRows = [];
     var ts = new Date().toISOString();
-    var user = Session.getActiveUser().getEmail() || 'system';
-    for (var j = 0; j < records.length; j++) {
+    var user = requestActor_ || Session.getActiveUser().getEmail() || 'system';
+    for (var j = 0; j < accepted.length; j++) {
       auditRows.push([
         'LOG-' + new Date().getTime() + '-' + j,
-        ts, user, 'Create', module, rows[j][0], '', JSON.stringify(records[j]),
+        ts, user, 'Create', module, rows[j][0], '', JSON.stringify(accepted[j]),
       ]);
     }
     if (auditRows.length > 0) {
       var auditStart = auditSheet.getLastRow() + 1;
+      ensureRowCapacity_(auditSheet, auditStart + auditRows.length - 1);
       auditSheet.getRange(auditStart, 1, auditRows.length, HEADERS.audit.length).setValues(auditRows);
     }
   } catch (err) {
@@ -1190,7 +1245,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   if (isBalanceSheet_(sheetName)) resyncLedger_();
 
   // Return the created records with their IDs
-  return { created: records.length, prefix: prefix };
+  return { created: accepted.length, skipped: records.length - accepted.length, prefix: prefix };
 }
 
 function readRowById_(sheetName, headers, idCol, id, row, rowNumber) {
@@ -1205,17 +1260,19 @@ function updateRecord_(sheetName, headers, record, idCol) {
   var id = record[idCol];
   var sheet = sheet_(sheetName);
   var data = tableData_(sheetName, headers);
-  var colIndex = headers.indexOf(idCol) + 1;
+  ensureColumnCapacity_(sheet, headers.length);
 
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
       var values = [];
       for (var c = 0; c < headers.length; c++) {
-        var val = record[headers[c]];
-        values.push(val === undefined ? data[r][headers[c]] : val);
+        var field = headers[c];
+        var val = field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
+          ? undefined : sheetValue_(record[field]);
+        values.push(val === undefined ? sheetValue_(data[r][headers[c]]) : val);
       }
       sheet.getRange(r + 2, 1, 1, headers.length).setValues([values]);
-      audit_(toModule_(sheetName), 'Update', id, '', JSON.stringify(values));
+      audit_(toModule_(sheetName), 'Update', id, '', sheetName === CONFIG.sheetNames.users ? '' : JSON.stringify(values));
       if (isBalanceSheet_(sheetName)) resyncLedger_();
       return { success: true };
     }
@@ -1273,6 +1330,11 @@ function parseIdNumber(id) {
  * VALIDATION
  * ========================================================================== */
 
+function sheetValue_(value) {
+  // Sheets interprets strings starting with "=" as formulas.
+  return typeof value === 'string' && value.charAt(0) === '=' ? "'" + value : value;
+}
+
 function validateRecord_(record, required) {
   if (!record || typeof record !== 'object') throw new Error('Invalid record payload');
   for (var i = 0; i < required.length; i++) {
@@ -1283,7 +1345,7 @@ function validateRecord_(record, required) {
   }
   // Numeric validate (only when an amount is provided)
   if (record.Amount !== undefined && record.Amount !== '' && record.Amount !== null) {
-    if (isNaN(Number(record.Amount))) throw new Error('Amount must be a number');
+    if (!Number.isFinite(Number(record.Amount))) throw new Error('Amount must be a number');
     if (Number(record.Amount) < 0) throw new Error('Amount cannot be negative');
   }
 }
@@ -1329,27 +1391,81 @@ function deleteMessage_(id, email, side) {
  * AUTH (Login)
  * ========================================================================== */
 
-function login_(body) {
-  var identifier = String(body && (body.identifier || body.email || body.phone) || '').toLowerCase();
-  var password = body && body.password || '';
-  var identDigits = normalizePhone_(identifier);
-  var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
-  for (var i = 0; i < users.length; i++) {
-    var u = users[i];
-    var emailMatch = String(u.Email).toLowerCase() === identifier;
-    var phoneMatch = !!u.Phone && normalizePhone_(u.Phone) === identDigits;
-    if ((emailMatch || phoneMatch) && String(u.Password) === password && u.Status !== 'inactive') {
-      // do not return the password to the client
-      var safe = {
-        userID: u.UserID, name: u.Name, email: u.Email,
-        role: u.Role, status: u.Status, createdDate: u.CreatedDate,
-        phone: u.Phone || '',
-      };
-      audit_('auth', 'Login', u.UserID, '', '');
-      return { user: safe, token: '' }; // token auth handled by API_KEY
-    }
+// Keep the verifier key in Script Properties, separately from spreadsheet data.
+function passwordVerifier_(password, salt) {
+  var key = scriptProperties.getProperty('PASSWORD_KEY');
+  if (!key) {
+    key = randomToken_();
+    scriptProperties.setProperty('PASSWORD_KEY', key);
   }
-  throw new Error('Invalid credentials');
+  var signature = Utilities.computeHmacSha256Signature(salt + ':' + password, key);
+  return 'hmac-v1:' + salt + ':' + Utilities.base64EncodeWebSafe(signature);
+}
+
+function isSeedPassword_(password) {
+  return /^(admin|accountant|manager|viewer|donor)123$/.test(password);
+}
+
+function prepareUserWrite_(record, creating) {
+  validateRecord_(record, creating ? ['Name', 'Email', 'Password'] : []);
+  if (record.Role !== undefined && ['admin', 'accountant', 'manager', 'viewer', 'donor'].indexOf(record.Role) < 0) {
+    throw new Error('Invalid user role');
+  }
+  if (record.Password === '' && !creating) delete record.Password;
+  if (record.Password !== undefined) {
+    if (typeof record.Password !== 'string' || record.Password.length < 12 || record.Password.length > 256) {
+      throw new Error('Choose a password between 12 and 256 characters.');
+    }
+    record.Password = passwordVerifier_(record.Password, randomToken_());
+  }
+  var email = String(record.Email || '').trim().toLowerCase();
+  var phone = normalizePhone_(record.Phone);
+  if (readAll_(CONFIG.sheetNames.users, HEADERS.users).some(function (user) {
+    return String(user.UserID) !== String(record.UserID) &&
+      ((email && String(user.Email).trim().toLowerCase() === email) ||
+       (phone && normalizePhone_(user.Phone) === phone));
+  })) throw new Error('Email or phone already belongs to another user');
+}
+
+function login_(body) {
+  var identifier = String(body.identifier || '').trim().toLowerCase();
+  var password = typeof body.password === 'string' ? body.password : '';
+  if (!identifier || identifier.length > 254 || !password || password.length > 256) throw new Error('Invalid credentials');
+  var cache = CacheService.getScriptCache();
+  var digits = /^[+()0-9 .-]+$/.test(identifier) ? normalizePhone_(identifier) : '';
+  var failureKey = 'login:' + digest_(digits || identifier);
+  if (Number(cache.get(failureKey)) >= 8 || Number(cache.get('login:all')) >= 100) {
+    throw new Error('Too many sign-in attempts. Try again in a few minutes.');
+  }
+  function fail() {
+    cache.put(failureKey, String(Number(cache.get(failureKey)) + 1), 300);
+    cache.put('login:all', String(Number(cache.get('login:all')) + 1), 60);
+    throw new Error('Invalid credentials');
+  }
+  var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
+  var matches = users.filter(function (user) {
+    return String(user.Email).trim().toLowerCase() === identifier ||
+      (digits && normalizePhone_(user.Phone) === digits);
+  });
+  if (matches.length !== 1 || matches[0].Status !== 'active' || isSeedPassword_(password)) return fail();
+  var user = matches[0];
+  var stored = String(user.Password);
+  var versioned = stored.indexOf('hmac-v1:') === 0;
+  var candidate = versioned ? passwordVerifier_(password, stored.split(':')[1]) : password;
+  if (digest_(candidate) !== digest_(stored)) return fail();
+  if (!versioned) {
+    stored = passwordVerifier_(password, randomToken_());
+    sheet_(CONFIG.sheetNames.users).getRange(users.indexOf(user) + 2, HEADERS.users.indexOf('Password') + 1).setValue(stored);
+  }
+  cache.remove(failureKey);
+  var token = randomToken_();
+  cache.put(sessionKey_(token), JSON.stringify({ id: String(user.UserID), credential: digest_(stored) }), 21600);
+  requestActor_ = user.Email;
+  audit_('auth', 'Login', user.UserID, '', '');
+  return { user: {
+    userID: user.UserID, name: user.Name, email: user.Email, role: user.Role,
+    status: user.Status, createdDate: user.CreatedDate, phone: user.Phone || '',
+  }, token: token };
 }
 
 /* ==========================================================================
@@ -1362,7 +1478,7 @@ function audit_(module, action, recordID, oldValue, newValue) {
     sheet.appendRow([
       'LOG-' + new Date().getTime(),
       new Date().toISOString(),
-      Session.getActiveUser().getEmail() || 'system',
+      requestActor_ || Session.getActiveUser().getEmail() || 'system',
       action,
       module,
       recordID,
@@ -1394,7 +1510,7 @@ function updateSettings_(settings) {
   }
   var nextRow = vals.length + 1;
   for (var k in settings) {
-    var val = settings[k] == null ? '' : String(settings[k]);
+    var val = settings[k] == null ? '' : sheetValue_(String(settings[k]));
     if (rowFor[k]) {
       s.getRange(rowFor[k], 2).setValue(val);
     } else {
@@ -1403,7 +1519,7 @@ function updateSettings_(settings) {
       nextRow++;
     }
   }
-  audit_('settings', 'Update', 'settings', '', JSON.stringify(settings));
+  audit_('settings', 'Update', 'settings', '', '');
   return { success: true };
 }
 
@@ -1450,7 +1566,7 @@ function buildDashboard_() {
   // Transactions-sheet rebuild here - that made the dashboard (and any page
   // that awaits it) hang for minutes once the sheet grew.
 
-  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).filter(notDeleted_);
+  var donations = readDonations_();
   var expenseRecords = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
   var transactions = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
@@ -1507,8 +1623,8 @@ function buildDashboard_() {
     .filter(function (d) { return isConstructionTagged_(d.Category, d.Purpose, ''); })
     .reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
 
-  var cash = accounts.filter(function (a) { return a.Type === 'cash'; })[0];
-  var bank = accounts.filter(function (a) { return a.Type === 'bank'; })[0];
+  var cash = accounts.filter(function (a) { return String(a.Type).toLowerCase() === 'cash'; });
+  var bank = accounts.filter(function (a) { return String(a.Type).toLowerCase() === 'bank'; });
 
   var pendingTotal = payments
     .filter(function (p) { return p.Status !== 'paid'; })
@@ -1525,8 +1641,8 @@ function buildDashboard_() {
     totalAssets: totalAssets,
     totalConstructionExpenses: totalConstruction,
     constructionDonations: constructionDonations,
-    cashBalance: cash ? toNum_(cash.CurrentBalance) : 0,
-    bankBalance: bank ? toNum_(bank.CurrentBalance) : 0,
+    cashBalance: sumBy_(cash, 'CurrentBalance'),
+    bankBalance: sumBy_(bank, 'CurrentBalance'),
     pendingPayments: pendingTotal,
     thisMonthDonations: thisMonthDonations,
     thisMonthExpenses: thisMonthExpenses,
@@ -1539,11 +1655,11 @@ function buildDashboard_() {
   };
 }
 
-function getReports_(params) {
+function getReports_(params, user) {
   var type = params.report || 'daily';
   var from = params.from || '';
   var to = params.to || '';
-  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).filter(notDeleted_);
+  var donations = donationsFor_(user);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses).filter(notDeleted_);
 
   var dFilter = donations.filter(function (d) { return inRange_(d.Date, from, to); });
@@ -1660,6 +1776,23 @@ function accountForPaymentMethodCached_(method, accounts) {
  * donations and expenses. Any transaction whose ReferenceID points at a
  * DON-/EXP- record is regenerated; ones with no source record (deleted) and
  * duplicates are removed. Manual transactions are left untouched. */
+function ledgerAccount_(record, accounts) {
+  var account = record.AccountID && accounts.find(function (a) {
+    return String(a.AccountID) === String(record.AccountID);
+  });
+  return account ? account.AccountName : accountForPaymentMethodCached_(record.PaymentMethod, accounts);
+}
+
+function ensureColumnCapacity_(sheet, columns) {
+  var capacity = sheet.getMaxColumns();
+  if (columns > capacity) sheet.insertColumnsAfter(capacity, columns - capacity);
+}
+
+function ensureRowCapacity_(sheet, lastRow) {
+  var capacity = sheet.getMaxRows();
+  if (lastRow > capacity) sheet.insertRowsAfter(capacity, lastRow - capacity);
+}
+
 function reconcileLedger_() {
   var txSheet = sheet_(CONFIG.sheetNames.transactions);
   var txHeader = HEADERS.transactions;
@@ -1683,7 +1816,7 @@ function reconcileLedger_() {
     desired.push({
       type: 'income', incomeOrExpense: 'income',
       amount: toNum_(d.Amount), date: String(d.Date),
-      account: accountForPaymentMethodCached_(d.PaymentMethod, accounts),
+      account: ledgerAccount_(d, accounts),
       referenceID: String(d.DonationID),
       description: 'Donation - ' + (d.DonorName || ''),
       createdBy: d.ReceivedBy || 'system',
@@ -1693,7 +1826,7 @@ function reconcileLedger_() {
     desired.push({
       type: 'expense', incomeOrExpense: 'expense',
       amount: toNum_(e.Amount), date: String(e.Date),
-      account: accountForPaymentMethodCached_(e.PaymentMethod, accounts),
+      account: ledgerAccount_(e, accounts),
       referenceID: String(e.ExpenseID),
       description: 'Expense - ' + (e.Description || ''),
       createdBy: e.PaidBy || 'system',
@@ -1708,7 +1841,7 @@ function reconcileLedger_() {
   var rows = [];
   manual.forEach(function (m) {
     if (!m || !m.TransactionID) return;
-    rows.push(txHeader.map(function (h) { return m[h] === undefined ? '' : m[h]; }));
+    rows.push(txHeader.map(function (h) { return m[h] === undefined ? '' : sheetValue_(m[h]); }));
     var tm = String(m.TransactionID || '').match(/TXN-(\d+)/);
     if (tm) { var n = parseInt(tm[1], 10); if (n > nextTxnNum) nextTxnNum = n; }
   });
@@ -1717,14 +1850,18 @@ function reconcileLedger_() {
     rows.push([
       'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
-      ent.account, ent.referenceID, ent.description, ent.createdBy,
+      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy),
     ]);
   });
 
   var allRows = [txHeader].concat(rows);
-  txSheet.clear();
+  ensureRowCapacity_(txSheet, allRows.length);
+  var previousLastRow = txSheet.getLastRow();
   if (allRows.length > 0) {
     txSheet.getRange(1, 1, allRows.length, txHeader.length).setValues(allRows);
+  }
+  if (previousLastRow > allRows.length) {
+    txSheet.getRange(allRows.length + 1, 1, previousLastRow - allRows.length, txHeader.length).clearContent();
   }
   txSheet.setFrozenRows(1);
 }
@@ -1845,8 +1982,7 @@ function fixDeletedDonations() {
  *      (admin-only). The app shows a preview first, requires typing RESET,
  *      and both web actions must present the SEPARATE reset password
  *      (Script Property RESET_KEY - run getResetKeyNow to view it). The
- *      destructive web action additionally sends confirm:'RESET', so a
- *      leaked API key alone can never wipe the books.
+ *      destructive web action additionally sends confirm:'RESET'.
  *
  * `resetAllTransactions()` wipes everything you *entered* and puts the books
  * back to a fresh state:
@@ -1965,9 +2101,9 @@ function resetAllTransactionsCore_(actor) {
  * {success:false,message}) when the key or confirmation is wrong. */
 
 function requireResetKey_(body) {
-  var expected = getResetKey_();
+  var expected = scriptProperties.getProperty('RESET_KEY');
   var got = String((body && (body.resetKey || body.resetPassword)) || '');
-  if (!got || got !== expected) throw new Error('Invalid reset password (run getResetKeyNow in Apps Script to view it)');
+  if (!expected || !got || digest_(got) !== digest_(expected)) throw new Error('Invalid reset password (run getResetKeyNow in Apps Script to view it)');
 }
 
 function resetPreviewWeb_(body) {
@@ -1975,12 +2111,12 @@ function resetPreviewWeb_(body) {
   return resetAllTransactionsPreview();
 }
 
-function resetAllWeb_(body) {
+function resetAllWeb_(body, actor) {
   requireResetKey_(body);
   if (String((body && body.confirm) || '').trim() !== 'RESET') {
     throw new Error('Type RESET in the confirmation dialog to proceed');
   }
-  return resetAllTransactionsCore_((body && body.userEmail) || '');
+  return resetAllTransactionsCore_(actor);
 }
 
 /* Dry-run variant of the full reset: reports what would be deleted without
@@ -2003,7 +2139,7 @@ function resetAllTransactionsPreview() {
  * SETUP HELPER
  *
  * Runs automatically on first open (via onOpen). Creates every sheet with the
- * correct headers, seeds default accounts/projects/demo users and settings,
+ * correct headers, seeds default accounts/projects and settings,
  * and writes the SPREADSHEET_ID to Script Properties. Idempotent - safe to
  * call repeatedly.
  * ========================================================================== */
@@ -2029,17 +2165,7 @@ function setupSpreadsheet(ss) {
   // 4) Seed example construction projects (if empty).
   ensureDefaultProjects_(ss);
 
-  // 5) Seed demo users so you can sign in (if empty).
-  ensureDefaultUsers_(ss);
-
-  // 6) Ensure API key exists.
-  var apiKey = getApiKey_();
-
-  Logger.log('=== Setup complete ===');
-  Logger.log('Spreadsheet ID: ' + ss.getId());
-  Logger.log('API key (secret): ' + apiKey);
-  Logger.log('Now: Deploy > New deployment > Web app. Copy the URL and set VITE_WEB_APP_URL = <url>');
-  Logger.log('     and VITE_API_TOKEN = ' + apiKey);
+  Logger.log('Setup complete. Configure the Users sheet before deploying the web app.');
 }
 
 function ensureSettingsSheet_(ss) {
@@ -2079,14 +2205,4 @@ function ensureDefaultProjects_(ss) {
   sh.appendRow(['PRJ-0002', 'Prayer Hall', 'Community lecture hall', '2026-01-15', 1500000, 0, 'not-started', '']);
   sh.appendRow(['PRJ-0003', 'Kitchen', 'Community kitchen', '2026-02-01', 800000, 0, 'not-started', '']);
   sh.appendRow(['PRJ-0004', 'Guest Rooms', 'Devotee accommodation', '2026-04-01', 1200000, 0, 'not-started', '']);
-}
-
-function ensureDefaultUsers_(ss) {
-  var sh = ensureSheet_(ss, 'users');
-  if (sh.getLastRow() > 1) return;
-  sh.appendRow(['USR-0001', 'Temple Administrator', 'admin@temple.org', 'admin', 'active', '2025-11-01', 'admin123']);
-  sh.appendRow(['USR-0002', 'Chief Accountant', 'accountant@temple.org', 'accountant', 'active', '2025-11-01', 'accountant123']);
-  sh.appendRow(['USR-0003', 'Projects Manager', 'manager@temple.org', 'manager', 'active', '2025-11-01', 'manager123']);
-  sh.appendRow(['USR-0004', 'Committee Viewer', 'viewer@temple.org', 'viewer', 'active', '2025-11-01', 'viewer123']);
-  sh.appendRow(['USR-0005', 'Donor Radha Krishna', 'donor@temple.org', 'donor', 'active', '2026-01-01', 'donor123', '9845012345']);
 }

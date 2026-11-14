@@ -175,7 +175,7 @@ export async function parseBankStatementXlsx(data: ArrayBuffer): Promise<BankSta
 }
 
 function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
-  const maxRows = Math.min(ws.rowCount, 4000)
+  const maxRows = ws.rowCount
   const maxHeaderScan = Math.min(maxRows, 25)
 
   for (let scan = 1; scan <= maxHeaderScan; scan++) {
@@ -212,11 +212,11 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       if (creditCol !== undefined || debitCol !== undefined) {
         const credit = creditCol !== undefined ? parseAmount(get(creditCol)) : NaN
         const debit = debitCol !== undefined ? parseAmount(get(debitCol)) : NaN
-        if (credit > 0) {
+        if (Number.isFinite(credit) && credit > 0) {
           amount = credit
           type = 'income'
-        } else if (debit > 0) {
-          amount = debit
+        } else if (Number.isFinite(debit) && debit !== 0) {
+          amount = Math.abs(debit)
           type = 'expense'
         }
       } else if (map.amount !== undefined) {
@@ -240,7 +240,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
         }
       }
 
-      if (type === null || amount <= 0) continue
+      if (type === null || !Number.isFinite(amount) || amount <= 0) continue
       rows.push({ date, description, reference, amount, type, donorName, remark })
     }
     if (rows.length > 0) return rows

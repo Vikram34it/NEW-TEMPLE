@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { Header } from '../components/Header'
+import { NAV_SECTIONS } from '../navigation'
 import { useApp } from '../context/AppContext'
 
 export function AppLayout() {
@@ -26,6 +27,9 @@ export function AppLayout() {
   if (user.role === 'donor' && location.pathname !== '/my-donations') {
     return <Navigate to="/my-donations" replace />
   }
+
+  const page = NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.path === location.pathname)
+  if (page && !page.roles.includes(user.role)) return <Navigate to="/" replace />
 
   return (
     <div className="flex h-screen overflow-hidden">

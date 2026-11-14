@@ -13,7 +13,7 @@ audit log, role-based access, and automatic balance calculations.
 - **Database:** Google Sheets
 - **Backend / API:** Google Apps Script Web App
 - **Hosting:** GitHub Pages
-- **Auth:** Simple role-based login (enforced client- and server-side)
+- **Auth:** Simple per-user sessions and server-side role checks
 
 ## Project Structure
 
@@ -55,39 +55,11 @@ Use these demo logins:
 
 ## Connecting the Real Google Sheets Backend
 
-### Step 1 — Create the spreadsheet (automated)
-1. Create a new, **blank** Google Spreadsheet.
-2. Open **Extensions → Apps Script**, create a new project.
-3. Paste the contents of `backend/Code.gs` into `Code.gs`, and copy
-   `backend/appsscript.json` as `appsscript.json`.
-4. **Close and reopen the spreadsheet** (or run `installAutomation` /
-   `setupSpreadsheet` from the Apps Script function dropdown). This runs `onOpen()`
-   which **automatically**:
-   - creates all 11 sheets with the correct headers,
-   - seeds default accounts, example projects, and demo users,
-   - writes `SPREADSHEET_ID` to Script Properties,
-   - generates a secret `API_KEY` and stores it in Script Properties.
-
-   You do **not** need to create any sheets, set `SPREADSHEET_ID`, or generate an
-   API key by hand. If a sheet is ever deleted, the backend recreates it on the
-   next API request automatically.
-
-### Step 2 — Get your API key
-Run `getApiKeyNow()` from the Apps Script **function dropdown**. It shows your
-generated `API_KEY` in a dialog. Note it down (keep it secret).
-
-### Step 3 — Deploy the Web App
-1. Click **Deploy → New deployment → Web app**.
-2. **Execute as:** Me (your account).
-3. **Who has access:** pick an option (see Security notes below).
-4. Copy the Web App URL.
-
-### Step 4 — Point the frontend at the API
-1. Copy `.env.example` to `.env.local`.
-2. Set `VITE_WEB_APP_URL` to your deployed Apps Script URL.
-3. Set `VITE_USE_MOCK=false`.
-4. Set `VITE_API_TOKEN` to the `API_KEY` from Step 2.
-5. Rebuild / redeploy.
+1. Keep the Google spreadsheet private. Open **Extensions > Apps Script** and copy in `backend/Code.gs` and the manifest.
+2. Run `setupSpreadsheet` from the Apps Script editor. This installs the table headers, including the new trailing import columns, and records the spreadsheet ID. Existing rows stay in place.
+3. In the private Users sheet, make sure one active admin has a unique email and a strong temporary password. Fresh setups have no default accounts for signing in. The admin can create additional users under Settings after signing in.
+4. Deploy a new Apps Script version as a web app and configure `VITE_WEB_APP_URL` and `VITE_USE_MOCK=false` for the frontend build. Deploy both sides together. Retire any old Apps Script deployments that still accept the former shared key and remove `VITE_API_TOKEN` from the build configuration.
+5. Reset existing user passwords before restoring access if the old API was deployed. Rotate any exposed SMS and WhatsApp credentials. Sign in with each role on a test spreadsheet before switching over the live app.
 
 ## Resetting All Entered Transactions
 
@@ -99,13 +71,11 @@ payments) and start the books fresh, you can use a built-in one-click reset:
 1. Sign in as an **admin** and go to **Settings → Users → Danger Zone →
    Reset All Transactions**.
 2. Open Apps Script once and run **`getResetKeyNow`** to view the *reset
-   password* (a separate secret, auto-generated on first use — it is NOT the
-   API key). Enter it in the dialog's **Reset password** field and click
+   password* (generated on first use). Enter it in the dialog's **Reset password** field and click
    **Preview** to see exactly how many rows will be deleted, per sheet.
 3. Type **RESET** to confirm, then click **Delete everything permanently**.
 
-Both web actions are gated by the reset password on the backend, so a leaked
-API key alone can never wipe the books. The reset is written to the AuditLog
+Both web actions require an active admin session and the reset password. The reset is written to the AuditLog
 with your email as the actor.
 
 ### Option B — from the Apps Script editor
@@ -124,10 +94,7 @@ counts before anything is deleted — choosing **No** (or cancelling) aborts.
 Users, people, vendors, projects and account definitions are untouched, and
 IDs restart at 0001 automatically.
 
-The reset is deliberately **not** reachable through the web app API — a leaked
-API key can never wipe the books; you must run the function by hand in Apps
-Script. For extra safety, **File → Version history** in the spreadsheet lets you
-restore anything.
+The web reset requires an active admin session, the separate reset password, and the typed confirmation. Google Sheets version history can be used to restore data.
 
 ## Deploying to GitHub Pages
 
@@ -160,38 +127,12 @@ server rewrites.
    `REC-2026-0001`, `PER-0001`, `VEN-0001`, `PRJ-0001`, `PAY-0001`,
    `TXN-2026-0001`). Generated server-side in the backend.
 
-## ⚠️ Security Notes: GitHub Pages + Google Sheets + Apps Script
+## Security and Bank Imports
 
-This architecture has real limitations you must understand before storing
-temple money data:
-
-- **GitHub Pages is a static host.** It cannot keep secrets. Anything you put in
-  the frontend bundle (React code) is publicly readable. Never put the
-  spreadsheet ID, an OAuth token, or the backend API key in the source or build.
-- **Google Apps Script Web Apps are not a hardened auth boundary.** A Web App
-  deployed as *Anyone* can be called by anyone with its URL. The frontend role
-  buttons are **cosmetic** — the backend (`Code.gs`) re-validates every request
-  and rejects those without a valid `API_KEY` token.
-
-### Safest practical approach within this stack
-1. **Keep the spreadsheet private** and never share it publicly.
-2. **Protect every backend call with an API key** (`API_KEY` in Script
-   Properties). The backend checks the `token` on every request (fail-closed).
-3. **Prefer restricted access:** under **Who has access**, choose *Only myself*
-   or *Known Google accounts* if your users have Google accounts, instead of
-   *Anyone with the link*.
-4. **Enforce role checks server-side**, not only in the UI.
-5. **Add Google Cloud IAP / Identity Platform** in front of the Apps Script if
-   you need strong authentication for genuinely sensitive financial data.
-6. For high-assurance deployments, move the API behind a real backend (e.g.
-   Cloud Run + Firestore + Firebase Auth), which this UI is designed to be
-   pointed at through the `services` layer.
-
-> Treat "demo passwords" as placeholders. In a production deployment, change
-> them, and strongly consider replacing the simple email/password check with a
-> proper identity provider (e.g. Firebase Auth or Google Sign-In). The API key
-> in the client is a convenience gate, not a replacement for true user
-> authentication — the backend `login()` still validates credentials server-side.
+- The API accepts POST requests and checks a per-user session and role on every protected action. Login is rate-limited. Sessions expire after up to six hours and can end early if Apps Script evicts a cached session.
+- Live user lists omit password verifiers. Existing passwords are converted to salted, server-keyed verifiers on successful sign-in. Public demo passwords are rejected in live mode. Keep the script project private and preserve its `PASSWORD_KEY` when moving a deployment.
+- The donor portal uses the email and phone on the authenticated donor account. Keep donor identities unique. Settings and audit responses withhold secret values where applicable.
+- Bank imports store the selected account ID with each row and skip previously imported matching rows, including on retries after a partial save. The match uses account, date, direction, amount, bank reference, narration, and the occurrence among identical rows. Older imports have no stored key, so reconcile those entries before reimporting old statements.
 
 ## Available Features
 

@@ -43,6 +43,8 @@ export interface Communication {
 }
 
 export interface Donation {
+  accountID?: string
+  bankImportKey?: string
   donationID: string
   date: string
   donorID: string
@@ -67,6 +69,8 @@ export interface Donation {
 }
 
 export interface Expense {
+  accountID?: string
+  bankImportKey?: string
   expenseID: string
   date: string
   category: string

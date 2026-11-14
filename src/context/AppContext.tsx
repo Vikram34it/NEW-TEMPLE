@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { CONFIG } from '../config/apiConfig'
-import { dataService } from '../services/apiService'
+import { dataService, hasLiveSession } from '../services/apiService'
 import { normalizePhone } from '../utils/helpers'
 import type {
   Account,
@@ -42,7 +42,9 @@ const SESSION_KEY = 'temple_session_user'
 
 function loadSessionUser(): User | null {
   try {
-    const raw = window.localStorage.getItem(SESSION_KEY)
+    if (CONFIG_USE_LIVE && !hasLiveSession()) return null
+    const storage = CONFIG_USE_LIVE ? window.sessionStorage : window.localStorage
+    const raw = storage.getItem(SESSION_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed === 'object' && parsed.userID && parsed.email) {
@@ -56,11 +58,18 @@ function loadSessionUser(): User | null {
 
 function storeSessionUser(u: User | null) {
   try {
-    if (u) window.localStorage.setItem(SESSION_KEY, JSON.stringify(u))
-    else window.localStorage.removeItem(SESSION_KEY)
+    const storage = CONFIG_USE_LIVE ? window.sessionStorage : window.localStorage
+    if (CONFIG_USE_LIVE) window.localStorage.removeItem(SESSION_KEY)
+    if (u) storage.setItem(SESSION_KEY, JSON.stringify(u))
+    else storage.removeItem(SESSION_KEY)
   } catch {
     // localStorage may be unavailable (e.g. private mode); session still works in-memory
   }
+}
+
+function bulkSaveMessage(label: string, created: number, skipped: number) {
+  const saved = created + ' ' + label + ' saved'
+  return skipped ? saved + ', ' + skipped + ' already imported' : saved
 }
 
 let seq = 100
@@ -229,7 +238,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 4500)
   }
 
+  const liveUserID = CONFIG_USE_LIVE ? user?.userID : undefined
+
   async function refreshAll(): Promise<void> {
+    if (CONFIG_USE_LIVE && !user) return
     const isDonor = user?.role === 'donor'
     const me = isDonor ? user.email : undefined
     const mob = isDonor ? user.phone : undefined
@@ -261,6 +273,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const load = (roles: User['role'][]) => !CONFIG_USE_LIVE || !!user && roles.includes(user.role)
+    const finance = load(['admin', 'accountant'])
+    const staff = load(['admin', 'accountant', 'manager'])
     const [u, p, d, e, v, pr, pp, ac, t, s, ann, ev, vols, req, comm] = await Promise.all([
       dataService.getUsers(),
       dataService.getPeople(),
@@ -268,15 +283,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dataService.getExpenses(),
       dataService.getVendors(),
       dataService.getProjects(),
-      dataService.getPendingPayments(),
-      dataService.getAccounts(),
-      dataService.getTransactions(),
+      staff ? dataService.getPendingPayments() : [],
+      staff ? dataService.getAccounts() : [],
+      finance ? dataService.getTransactions() : [],
       dataService.getSettings(),
       dataService.getAnnouncements(),
       dataService.getEvents(),
       dataService.getEventVolunteers(),
       dataService.getRequests(),
-      dataService.getCommunications(),
+      staff ? dataService.getCommunications() : [],
     ])
     setUsers(u)
     setPeople(p)
@@ -327,11 +342,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveUserID])
+
+  useEffect(() => {
+    const expire = () => {
+      storeSessionUser(null)
+      setUser(null)
+      notify('error', 'Your session expired. Please sign in again.')
+    }
+    window.addEventListener('temple-session-expired', expire)
+    return () => window.removeEventListener('temple-session-expired', expire)
   }, [])
 
   // Load (or clear) the mailbox whenever the logged-in user changes.
   useEffect(() => {
-    if (user) {
+    if (user && user.role !== 'donor') {
       dataService
         .getMessages(user.email)
         .then(setMessages)
@@ -371,6 +396,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return new Promise((resolve) => {
       const finish = (msg: string | null, u: User | null) => {
         if (!msg && u) {
+          if (CONFIG_USE_LIVE) setLoading(true)
           setUser(u)
           storeSessionUser(u)
           audit('Login', 'Auth', u.userID)
@@ -399,6 +425,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    if (CONFIG_USE_LIVE) void dataService.logout().catch(() => {})
     audit('Logout', 'Auth', user?.userID || '')
     setUser(null)
     storeSessionUser(null)
@@ -473,27 +500,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function bulkAddDonations(items: Array<Omit<Donation, 'donationID' | 'receiptNumber'>>): Promise<Donation[]> {
-    const isLive = CONFIG_USE_LIVE
-    const created: Donation[] = []
+    if (!items.length) return []
     try {
-      if (isLive) {
-        // Live mode: send all records in a single HTTP request. The backend
-        // generates IDs, appends rows, and resyncs the ledger once.
-        if (items.length > 0) {
-          await dataService.bulkPersist('donations', items as Array<Record<string, unknown>>)
-        }
-      } else {
-        for (const item of items) {
-          const run = `DON-2026-${String(nextSeq() + 1).padStart(4, '0')}`
-          const receipt = `${settings.receiptPrefix}-2026-${String(nextSeq()).padStart(4, '0')}`
-          Object.assign(item, { donationID: run, receiptNumber: receipt, createdAt: new Date().toISOString() } as Partial<Donation>)
-          created.push((await dataService.persist('donations', 'create', { ...item })) as Donation)
-        }
+      if (CONFIG_USE_LIVE) {
+        const result = await dataService.bulkPersist('donations', items as Array<Record<string, unknown>>) as { created: number; skipped: number }
+        notify('success', bulkSaveMessage('donations', result.created, result.skipped))
+        await refreshAllSafe()
+        return []
       }
-      notify('success', `${items.length} donation${items.length === 1 ? '' : 's'} saved`)
+      const records = items.map((item) => {
+        const sequence = String(nextSeq()).padStart(4, '0')
+        const record = { ...item, donationID: 'DON-2026-' + sequence, receiptNumber: settings.receiptPrefix + '-2026-' + sequence, createdAt: new Date().toISOString() }
+        return record
+      })
+      const created = await dataService.bulkPersist('donations', records) as Donation[]
+      notify('success', bulkSaveMessage('donations', created.length, items.length - created.length))
       await refreshAll()
-      if (!isLive) audit('BulkCreate', 'Donations', `${created.length} records`, `${created.map((c) => c.donationID).join(', ')}`)
-      return isLive ? [] : created
+      audit('BulkCreate', 'Donations', created.map((record) => record.donationID).join(', '))
+      return created
     } catch (err) {
       notify('error', errMsg(err))
       await refreshAllSafe()
@@ -552,25 +576,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   async function bulkAddExpenses(items: Array<Omit<Expense, 'expenseID'>>): Promise<Expense[]> {
-    const isLive = CONFIG_USE_LIVE
-    const created: Expense[] = []
+    if (!items.length) return []
     try {
-      for (const item of items) {
-        if (!isLive) {
-          Object.assign(item, {
-            expenseID: `EXP-2026-${String(nextSeq()).padStart(4, '0')}`,
-            createdAt: new Date().toISOString(),
-          } as Partial<Expense>)
-        }
-        created.push((await dataService.persist('expenses', 'create', { ...item })) as Expense)
+      if (CONFIG_USE_LIVE) {
+        const result = await dataService.bulkPersist('expenses', items as Array<Record<string, unknown>>) as { created: number; skipped: number }
+        notify('success', bulkSaveMessage('expenses', result.created, result.skipped))
+        await refreshAllSafe()
+        return []
       }
-      if (isLive) {
-        // Ensure imported expenses are posted to the ledger before refresh.
-        await dataService.resyncLedger().catch(() => {})
-      }
-      notify('success', `${created.length} expense${created.length === 1 ? '' : 's'} saved`)
+      const records = items.map((item) => {
+        const record = { ...item, expenseID: 'EXP-2026-' + String(nextSeq()).padStart(4, '0'), createdAt: new Date().toISOString() }
+        return record
+      })
+      const created = await dataService.bulkPersist('expenses', records) as Expense[]
+      notify('success', bulkSaveMessage('expenses', created.length, items.length - created.length))
       await refreshAll()
-      if (!isLive) audit('BulkCreate', 'Expenses', `${created.length} records`, `${created.map((c) => c.expenseID).join(', ')}`)
+      audit('BulkCreate', 'Expenses', created.map((record) => record.expenseID).join(', '))
       return created
     } catch (err) {
       notify('error', errMsg(err))
@@ -888,7 +909,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return nu
   }
   async function updateUser(u: User): Promise<void> {
-    setUsers((prev) => prev.map((x) => (x.userID === u.userID ? { ...x, ...u } : x)))
     if (CONFIG_USE_LIVE) {
       try {
         await dataService.persist('users', 'update', u)
@@ -900,6 +920,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw err
       }
     } else {
+      setUsers((prev) => prev.map((x) => (x.userID === u.userID ? { ...x, ...u } : x)))
       audit('Update', 'Users', u.userID)
     }
   }

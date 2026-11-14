@@ -6,7 +6,7 @@ put these exact headers in row 1 (the API reads and writes by these column names
 ## 1. Users
 | UserID | Name | Email | Role | Status | CreatedDate | Password | Phone |
 |--------|------|-------|------|--------|-------------|----------|-------|
-| USR-1 | Temple Administrator | admin@temple.org | admin | active | 2025-11-01 | admin123 | |
+| USR-1 | Temple Administrator | admin@temple.org | admin | active | 2025-11-01 | (set privately) | |
 
 Roles: `admin`, `accountant`, `manager`, `viewer`, `donor`. Status: `active` / `inactive`.
 
@@ -16,8 +16,7 @@ Roles: `admin`, `accountant`, `manager`, `viewer`, `donor`. Status: `active` / `
 > as a fallback. Set the donor's `Phone` when creating their account so mobile
 > matching works.
 
-> Note: In production you should change the demo passwords and ideally handle
-> authentication differently (see SECURITY in Code.gs).
+> The Password column holds a server-keyed verifier after sign-in. Live demo passwords are disabled.
 
 ## 2. People
 PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Status | Notes | Birthday | Anniversary | PreferredChannel | PANNumber | AadhaarNumber
@@ -27,14 +26,16 @@ PersonID | Name | Phone | Email | Address | City | PersonType | JoinDate | Statu
 `Birthday` / `Anniversary` are dates (YYYY-MM-DD; year optional). `PreferredChannel` is one of `WhatsApp`, `Email`, `SMS`, `Call`, `In Person`, `None` (used by Donor Care for greeting lists). `PANNumber` / `AadhaarNumber` are stored for donors who need an 80G tax-exemption receipt.
 
 ## 3. Donations
-DonationID | Date | DonorID | DonorName | Phone | Email | Address | Amount | Category | Purpose | PaymentMethod | TransactionReference | ReceivedBy | ReceiptNumber | Notes | PANNumber | AadhaarNumber | Need80G | CreatedAt | UpdatedAt | Deleted
+DonationID | Date | DonorID | DonorName | Phone | Email | Address | Amount | Category | Purpose | PaymentMethod | TransactionReference | ReceivedBy | ReceiptNumber | Notes | PANNumber | AadhaarNumber | Need80G | CreatedAt | UpdatedAt | Deleted | AccountID | BankImportKey
 
 - `DonationID` auto-generated: `DON-2026-0001`
 - `ReceiptNumber` auto-generated: `REC-2026-0001`
 - `Deleted` = `TRUE` marks the record soft-deleted (cancelled) instead of hard-removed.
 
+AccountID and BankImportKey are appended for bank-imported rows. Legacy rows may leave both blank.
+
 ## 4. Expenses
-ExpenseID | Date | Category | Description | Amount | PaymentMethod | VendorID | VendorName | BillNumber | TransactionReference | ProjectID | ProjectName | ApprovedBy | PaidBy | Notes | CreatedAt | UpdatedAt | Deleted
+ExpenseID | Date | Category | Description | Amount | PaymentMethod | VendorID | VendorName | BillNumber | TransactionReference | ProjectID | ProjectName | ApprovedBy | PaidBy | Notes | CreatedAt | UpdatedAt | Deleted | AccountID | BankImportKey
 
 ## 5. Vendors
 VendorID | CompanyName | ContactPerson | Phone | Email | Address | ServiceType | GSTNumber | BankDetails | Notes
@@ -95,19 +96,6 @@ and updates `Status` (`scheduled` → `sent` / `partial` / `failed`, or `cancell
 
 ---
 
-## How to set it up — FULLY AUTOMATED (no manual sheet work)
+## Setup
 
-1. Create a new, **blank** Google Spreadsheet.
-2. Open **Extensions → Apps Script**.
-3. Paste the contents of `backend/Code.gs` into `Code.gs` and save.
-4. **Close and reopen the spreadsheet** (or run `installAutomation` / `setupSpreadsheet`
-   from the Apps Script function dropdown). On open, the script automatically:
-   - creates **all 11 sheets** with the correct headers (frozen row 1),
-   - seeds **default accounts**, **example projects**, and **demo users**,
-   - writes `SPREADSHEET_ID` to Script Properties,
-   - generates a secret `API_KEY` and stores it in Script Properties.
-5. Run `getApiKeyNow()` from the function dropdown to view the generated API key.
-6. Deploy as a Web App (see README) and copy the Web App URL.
-
-> The backend is self-healing: if any sheet is ever deleted or missing, it is
-> recreated automatically on the next API request. No manual intervention needed.
+Run `setupSpreadsheet` after installing or updating the script. It creates the tables, adds the import columns, seeds accounts and sample projects on empty sheets, and stores the spreadsheet ID. Add the first administrator in the private Users sheet. Follow the deployment steps in the README.

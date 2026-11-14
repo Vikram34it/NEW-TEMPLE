@@ -10,7 +10,7 @@ import type { ResetPreviewResult } from '../services/apiService'
 import type { Role, User } from '../types'
 
 export function SettingsPage() {
-  const { settings, updateSettings, users, auditLog, deleteUser, can, user } = useApp()
+  const { settings, updateSettings, users, auditLog, deleteUser, can } = useApp()
   const [form, setForm] = useState({ ...settings })
   const [saveMsg, setSaveMsg] = useState('')
   const [saving, setSaving] = useState(false)
@@ -323,7 +323,7 @@ export function SettingsPage() {
       </Modal>
 
       <Modal open={showReset} onClose={() => setShowReset(false)} title="Reset All Transactions">
-        <ResetAllForm email={user?.email || ''} onDone={() => setShowReset(false)} />
+        <ResetAllForm onDone={() => setShowReset(false)} />
       </Modal>
     </div>
   )
@@ -401,7 +401,7 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
   )
 }
 
-function ResetAllForm({ email, onDone }: { email: string; onDone: () => void }) {
+function ResetAllForm({ onDone }: { onDone: () => void }) {
   const [resetKey, setResetKey] = useState('')
   const [preview, setPreview] = useState<ResetPreviewResult | null>(null)
   const [confirmText, setConfirmText] = useState('')
@@ -434,7 +434,7 @@ function ResetAllForm({ email, onDone }: { email: string; onDone: () => void }) 
     setBusy(true)
     setMsg('')
     try {
-      const result = await dataService.resetAllTransactions(resetKey.trim(), email)
+      const result = await dataService.resetAllTransactions(resetKey.trim())
       setMsg(`${result.total} rows deleted. Balances rebuilt, receipt counter restarted. Reloading…`)
       setTimeout(() => window.location.reload(), 1500)
     } catch (err) {

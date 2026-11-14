@@ -4,7 +4,6 @@ import { join } from 'node:path'
 
 process.env.VITE_USE_MOCK = 'true'
 process.env.VITE_WEB_APP_URL = ''
-process.env.VITE_API_TOKEN = ''
 
 await build({ configFile: 'vite.config.ts', logLevel: 'info' })
 

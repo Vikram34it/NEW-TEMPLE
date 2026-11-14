@@ -244,8 +244,8 @@ export function buildDashboardData(
 
   // Balances mirror the reconciled ledger accounts (construction money lives in
   // the Construction account, so cash/bank here are the non-construction balances).
-  const cashBalance = accounts.find((a) => a.type === 'cash')?.currentBalance || 0
-  const bankBalance = accounts.find((a) => a.type === 'bank')?.currentBalance || 0
+  const cashBalance = accounts.filter((a) => a.type === 'cash').reduce((sum, a) => sum + a.currentBalance, 0)
+  const bankBalance = accounts.filter((a) => a.type === 'bank').reduce((sum, a) => sum + a.currentBalance, 0)
 
   const pendingTotal = pendingPayments
     .filter((p) => p.status !== 'paid')
