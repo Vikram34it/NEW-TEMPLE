@@ -807,9 +807,13 @@ export const dataService = {
     await request
   },
 
-  async login(identifier: string, password: string): Promise<User> {
+  async staffLoginOptions(): Promise<{ id: string; name: string }[]> {
+    return apiFetch('staffLoginOptions')
+  },
+
+  async login(identifier: string, password: string, staff = false): Promise<User> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
-      const res = (await apiFetch('login', {}, { identifier, password })) as { user: User; token: string }
+      const res = (await apiFetch('login', {}, { identifier, password, staff })) as { user: User; token: string }
       if (!res.token) throw new Error('Update the Apps Script deployment before signing in.')
       setSessionToken(res.token)
       return res.user

@@ -213,6 +213,11 @@ function handleRequest_(e, method) {
     var action = request.action;
     if (typeof action !== 'string') throw new Error('Invalid action');
     var body = request.body || {};
+    if (action === 'staffLoginOptions') {
+      return reply({ success: true, data: readAll_(CONFIG.sheetNames.users, HEADERS.users)
+        .filter(function (user) { return user.Status === 'active' && staffLoginRole_(user.Role); })
+        .map(function (user) { return { id: String(user.UserID), name: String(user.Name) }; }) });
+    }
     var read = Boolean(READ_ROLES_[action]);
     if (!read) {
       lock = LockService.getScriptLock();
@@ -2047,21 +2052,36 @@ function isSeedPassword_(password) {
   return /^(admin|accountant|manager|viewer|donor)123$/.test(password);
 }
 
+function staffLoginRole_(role) {
+  return ['admin', 'accountant', 'manager', 'viewer', 'collector'].indexOf(role) >= 0;
+}
+
+function shortStaffPasswordRole_(role) {
+  return role !== 'admin' && staffLoginRole_(role);
+}
+
 function prepareUserWrite_(record, creating) {
   validateRecord_(record, creating ? ['Name', 'Email', 'Password'] : []);
   if (record.Role !== undefined && ['admin', 'accountant', 'manager', 'viewer', 'donor', 'collector'].indexOf(record.Role) < 0) {
     throw new Error('Invalid user role');
   }
+  var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
+  var current = creating ? null : users.find(function (user) { return String(user.UserID) === String(record.UserID); });
+  var role = record.Role || (current && current.Role);
   if (record.Password === '' && !creating) delete record.Password;
+  if (current && shortStaffPasswordRole_(current.Role) && !shortStaffPasswordRole_(role) && record.Password === undefined) {
+    throw new Error('Set a new password when changing this role.');
+  }
+  var minimum = shortStaffPasswordRole_(role) ? 4 : 12;
   if (record.Password !== undefined) {
-    if (typeof record.Password !== 'string' || record.Password.length < 12 || record.Password.length > 256) {
-      throw new Error('Choose a password between 12 and 256 characters.');
+    if (typeof record.Password !== 'string' || record.Password.trim().length < minimum || record.Password.length > 256 || isSeedPassword_(record.Password)) {
+      throw new Error('Choose a password between ' + minimum + ' and 256 characters. Avoid demo passwords.');
     }
     record.Password = passwordVerifier_(record.Password, randomToken_());
   }
   var email = String(record.Email || '').trim().toLowerCase();
   var phone = normalizePhone_(record.Phone);
-  if (readAll_(CONFIG.sheetNames.users, HEADERS.users).some(function (user) {
+  if (users.some(function (user) {
     return String(user.UserID) !== String(record.UserID) &&
       ((email && String(user.Email).trim().toLowerCase() === email) ||
        (phone && normalizePhone_(user.Phone) === phone));
@@ -2179,7 +2199,14 @@ function login_(body) {
   if (!identifier || identifier.length > 254 || !password || password.length > 256) throw new Error('Invalid credentials');
   var cache = CacheService.getScriptCache();
   var digits = /^[+()0-9 .-]+$/.test(identifier) ? normalizePhone_(identifier) : '';
-  var failureKey = 'login:' + digest_(digits || identifier);
+  var staff = body.staff === true;
+  var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
+  var matches = users.filter(function (user) {
+    if (staff && !staffLoginRole_(user.Role)) return false;
+    return (staff && String(user.UserID).toLowerCase() === identifier) ||
+      String(user.Email).trim().toLowerCase() === identifier || (digits && normalizePhone_(user.Phone) === digits);
+  });
+  var failureKey = 'login:' + digest_(matches.length === 1 ? String(matches[0].UserID) : (digits || identifier));
   if (Number(cache.get(failureKey)) >= 8 || Number(cache.get('login:all')) >= 100) {
     throw new Error('Too many sign-in attempts. Try again in a few minutes.');
   }
@@ -2188,11 +2215,6 @@ function login_(body) {
     cache.put('login:all', String(Number(cache.get('login:all')) + 1), 60);
     throw new Error('Invalid credentials');
   }
-  var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
-  var matches = users.filter(function (user) {
-    return String(user.Email).trim().toLowerCase() === identifier ||
-      (digits && normalizePhone_(user.Phone) === digits);
-  });
   if (matches.length !== 1 || matches[0].Status !== 'active' || isSeedPassword_(password)) return fail();
   var user = matches[0];
   var stored = String(user.Password);

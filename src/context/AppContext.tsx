@@ -87,7 +87,7 @@ function errMsg(e: unknown): string {
 interface AppContextValue {
   refreshCollectionsLedger: () => Promise<void>
   user: User | null
-  login: (identifier: string, password: string) => Promise<string | null>
+  login: (identifier: string, password: string, staff?: boolean) => Promise<string | null>
   logout: () => void
   can: (permission: string) => boolean
 
@@ -395,7 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAuditLog((prev) => [entry, ...prev].slice(0, 500))
   }
 
-  function login(identifier: string, password: string): Promise<string | null> {
+  function login(identifier: string, password: string, staff = false): Promise<string | null> {
     return new Promise((resolve) => {
       const finish = (msg: string | null, u: User | null) => {
         if (!msg && u) {
@@ -411,7 +411,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const found = users.find((u) => {
             const emailOk = u.email.toLowerCase() === identifier.toLowerCase()
             const phoneOk = !!u.phone && normalizePhone(u.phone) === normalizePhone(identifier)
-            return (emailOk || phoneOk) && u.password === password
+            return (!staff || u.role !== 'donor') && (emailOk || phoneOk || (staff && u.userID === identifier)) && u.password === password
           })
           if (found && found.status === 'active') {
             finish(null, found)
@@ -420,7 +420,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }, 400)
       } else {
-        dataService.login(identifier, password)
+        dataService.login(identifier, password, staff)
           .then((u) => finish(null, u))
           .catch((err) => finish(err instanceof Error ? err.message : 'Login failed', null))
       }

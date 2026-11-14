@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
@@ -16,8 +16,10 @@ const demoAccounts = [
   { role: 'Donor', email: 'donor@temple.org', mob: '9845012345', pass: 'donor123' },
 ]
 
+const staffRoles: Role[] = ['admin', 'accountant', 'manager', 'viewer', 'collector']
+
 export function LoginPage({ staff = false }: { staff?: boolean }) {
-  const { user, login } = useApp()
+  const { user, users, login } = useApp()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -28,13 +30,30 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
   const [showActivation, setShowActivation] = useState(false)
   const [activationNotice, setActivationNotice] = useState('')
 
+  const [staffOptions, setStaffOptions] = useState<{ id: string; name: string }[]>([])
+  const [loadingStaff, setLoadingStaff] = useState(staff && !CONFIG.useMockData)
+  const [useEmail, setUseEmail] = useState(false)
+
+  useEffect(() => {
+    if (!staff || CONFIG.useMockData || user) return
+    let active = true
+    dataService.staffLoginOptions().then((options) => {
+      if (active) setStaffOptions(options)
+    }).catch(() => {
+      if (active) setUseEmail(true)
+    }).finally(() => {
+      if (active) setLoadingStaff(false)
+    })
+    return () => { active = false }
+  }, [staff, user])
+
   if (user) return <Navigate to="/" replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError('')
-    const err = await login(email, password)
+    const err = await login(email, password, staff)
     setBusy(false)
     if (err) {
       setError(err)
@@ -44,6 +63,14 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
   }
 
   const isDonorMode = !staff
+  const staffChoices = (CONFIG.useMockData
+    ? users.filter((item) => item.status === 'active' && staffRoles.includes(item.role))
+      .map((item) => ({ id: item.userID, name: item.name }))
+    : staffOptions
+  ).map((item) => ({ ...item, name: item.name.trim() }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en-IN', { sensitivity: 'base' }) || a.id.localeCompare(b.id))
+  const nameCounts = new Map<string, number>()
+  for (const item of staffChoices) nameCounts.set(item.name, (nameCounts.get(item.name) || 0) + 1)
   const visibleAccounts = demoAccounts.filter((account) => (account.role === 'Donor') === isDonorMode)
 
   return (
@@ -78,15 +105,29 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
                 Sign in with your registered mobile number or email to view your donations and receipts.
               </p>
             )}
-            <Field label={isDonorMode ? 'Mobile Number or Email' : 'Email'} required>
-              <Input
-                type={isDonorMode ? 'text' : 'email'}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={isDonorMode ? 'Mobile number or email' : 'you@temple.org'}
-                required
-              />
-            </Field>
+            {staff && !useEmail ? (
+              <Field label="Staff member" required>
+                <Select value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loadingStaff}>
+                  <option value="">{loadingStaff ? 'Loading staff…' : 'Select your name'}</option>
+                  {staffChoices.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}{(nameCounts.get(item.name) || 0) > 1 ? ' (' + item.id + ')' : ''}</option>
+                  ))}
+                </Select>
+              </Field>
+            ) : (
+              <Field label={isDonorMode ? 'Mobile Number or Email' : 'Email'} required>
+                <Input
+                  type={isDonorMode ? 'text' : 'email'}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={isDonorMode ? 'Mobile number or email' : 'you@temple.org'}
+                  required
+                />
+              </Field>
+            )}
+            {staff && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => { setEmail(''); setError(''); setUseEmail(!useEmail) }}>
+              {useEmail ? 'Choose your name' : 'Use email instead'}
+            </button>}
             <Field label={isDonorMode ? 'Password or PIN' : 'Password'} required>
               <div className="relative">
                 <Input
@@ -144,7 +185,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
             {visibleAccounts.map((a) => (
               <button
                 key={a.role}
-                onClick={() => { setEmail(isDonorMode && a.mob ? a.mob : a.email); setPassword(a.pass) }}
+                onClick={() => { setEmail(isDonorMode && a.mob ? a.mob : a.email); if (staff) setUseEmail(true); setPassword(a.pass) }}
                 className="text-left text-xs bg-white border border-slate-200 rounded-lg p-2.5 hover:border-orange-400 hover:shadow-sm transition-all"
               >
                 <span className="block font-semibold text-slate-700">{a.role}</span>

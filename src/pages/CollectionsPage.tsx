@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button, Card, Field, Input, Modal, PageHeader, Select } from '../components/ui'
 import { CONFIG } from '../config/apiConfig'
@@ -39,51 +40,100 @@ function LiveCollectionsPage() {
   const [rows, setRows] = useState<CollectionEntry[]>([])
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<CollectionEntry | null>(null)
-  const [revision, setRevision] = useState(0)
+  const [filter, setFilter] = useState<CollectionEntry['status'] | 'all'>('all')
+  const [showAll, setShowAll] = useState(false)
 
   async function load() {
+    setLoading(true)
+    setError('')
     try {
       setRows(await dataService.getCollections(true))
     } catch (err) {
       setError(errorText(err))
+    } finally {
+      setLoading(false)
     }
   }
 
   useEffect(() => { void load() }, [])
 
+  const statuses = [
+    { label: 'Pending review', status: 'Pending review', color: 'bg-amber-50 text-amber-900' },
+    { label: 'Needs correction', status: 'Needs correction', color: 'bg-rose-50 text-rose-900' },
+    { label: 'Approved', status: 'Approved', color: 'bg-emerald-50 text-emerald-900' },
+  ] as const
+  const filtered = filter === 'all' ? rows : rows.filter((row) => row.status === filter)
+
+  function openCollection(entry: CollectionEntry | null = null) {
+    setMessage('')
+    setEditing(entry)
+    setFormOpen(true)
+    requestAnimationFrame(() => document.getElementById('collection-entry')?.scrollIntoView({ block: 'start' }))
+  }
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <PageHeader title="Collections" subtitle="Record a donation or construction material received during a visit." />
+    <div className="mx-auto max-w-3xl space-y-5">
+      <section className="rounded-2xl bg-orange-950 p-5 text-white sm:p-7">
+        <h1 className="text-2xl font-semibold">Collections</h1>
+        <p className="mt-1 text-sm text-orange-100">Hare Krishna, {user?.name}. Record donations and materials from your visits.</p>
+        <Button className="mt-5 w-full sm:w-auto" disabled={formOpen} onClick={() => openCollection()}>
+          <Plus size={18} /> New collection
+        </Button>
+      </section>
+
       {message && <p className="rounded-lg bg-emerald-50 p-3 text-emerald-800" role="status">{message}</p>}
-      <CollectionForm key={revision} entry={editing} representative={user?.name || ''} onCancel={() => {
-        setEditing(null)
-        setRevision((value) => value + 1)
-      }} onSaved={async (id) => {
-        setMessage('Submitted for approval · ' + id.slice(0, 12))
-        setEditing(null)
-        setRevision((value) => value + 1)
-        await load()
-      }} />
-      <Card className="space-y-3 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-semibold">My Collections</h2>
-          <Button variant="secondary" onClick={() => { setError(''); void load() }}>Refresh</Button>
+
+      {formOpen && (
+        <div id="collection-entry" className="scroll-mt-4">
+          <CollectionForm entry={editing} representative={user?.name || ''} onCancel={() => setFormOpen(false)} onSaved={async (id) => {
+            setFormOpen(false)
+            setMessage('Submitted for approval · ' + id.slice(0, 12))
+            setFilter('all')
+            await load()
+          }} />
         </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="Filter collections by status">
+        {statuses.map(({ label, status, color }) => (
+          <button key={status} type="button" aria-pressed={filter === status}
+            onClick={() => { setFilter(filter === status ? 'all' : status); setShowAll(false) }}
+            className={`rounded-xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 sm:p-4 ${color} ${filter === status ? 'ring-2 ring-current' : ''}`}>
+            <span className="block text-xl font-semibold tabular-nums">
+              {loading || error ? '—' : rows.filter((row) => row.status === status).length}
+            </span>
+            <span className="block text-xs font-medium sm:text-sm">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <Card className="space-y-3 p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-semibold">{filter === 'all' ? 'My Collections' : filter}</h2>
+          <Button variant="secondary" disabled={loading} onClick={load}>Refresh</Button>
+        </div>
+        {filter !== 'all' && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => { setFilter('all'); setShowAll(false) }}>Show all statuses</button>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-        {!rows.length && !error && <p className="text-sm text-slate-500">No submissions yet.</p>}
-        {rows.map((row) => (
+        {loading && <p role="status" className="text-sm text-slate-500">Loading collections…</p>}
+        {!loading && !filtered.length && !error && <p className="text-sm text-slate-500">
+          {filter === 'all' ? 'No collections submitted yet.' : 'No collections with this status.'}
+        </p>}
+        {filtered.slice(0, showAll ? filtered.length : 5).map((row) => (
           <div key={row.id} className="space-y-1 border-t border-slate-100 pt-3 text-sm">
             <p className="font-medium">{row.details.name} · {summary(row.details)}</p>
             <p className="text-slate-600">{row.status} · {row.details.date} · {row.id.slice(0, 12)}</p>
-            {row.note && <p className="text-slate-600">{row.note}</p>}
-            {row.status === 'Needs correction' && <Button variant="secondary" onClick={() => {
-              setEditing(row)
-              setRevision((value) => value + 1)
-              document.getElementById('collection-form')?.scrollIntoView({ behavior: 'smooth' })
-            }}>Correct submission</Button>}
+            {row.note && <p className="break-words text-slate-600">{row.note}</p>}
+            {row.status === 'Needs correction' && (
+              <Button variant="secondary" disabled={formOpen} onClick={() => openCollection(row)}>Correct submission</Button>
+            )}
           </div>
         ))}
+        {filtered.length > 5 && <Button variant="secondary" onClick={() => setShowAll(!showAll)}>
+          {showAll ? 'Show recent only' : 'Show all ' + filtered.length + ' submissions'}
+        </Button>}
       </Card>
     </div>
   )
@@ -161,7 +211,10 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
     <Card className="p-4 sm:p-5">
       <form id="collection-form" className="space-y-5" onSubmit={submit}>
         <section className="space-y-3">
-          <h2 className="font-semibold">{entry ? 'Correct collection' : 'Find donor'}</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold">{entry ? 'Correct collection' : 'Find donor'}</h2>
+            <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
+          </div>
           {entry?.note && <p className="rounded-lg bg-amber-50 p-3 text-sm">{entry.note}</p>}
           {donorSelected ? (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
@@ -274,7 +327,6 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
             <p className="text-sm text-slate-600">ISKCON representative · {representative}</p>
             <div className="flex flex-wrap gap-2">
               <Button type="submit" disabled={busy}>{busy ? 'Please wait…' : 'Submit for approval'}</Button>
-              {entry && <Button type="button" variant="secondary" onClick={onCancel}>Cancel correction</Button>}
             </div>
           </section>
         )}

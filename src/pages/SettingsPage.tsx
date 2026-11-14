@@ -347,6 +347,7 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
   }, ...initial })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const minimum = form.role === 'admin' || form.role === 'donor' ? 12 : 4
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -376,8 +377,8 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
       <Field label="Mobile Number" hint="For bank donations, use the verified mobile number on the donor profile.">
         <Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 9845012345" />
       </Field>
-      <Field label="Password" required={!initial?.userID} hint={initial?.userID ? 'Leave blank to keep the current password.' : 'Use at least 12 characters for a live account.'}>
-        <Input type="password" autoComplete="new-password" value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!initial?.userID} />
+      <Field label="Password" required={!initial?.userID} hint={initial?.userID ? 'Use at least ' + minimum + ' characters, or leave blank to keep the current password.' : 'Use at least ' + minimum + ' characters.'}>
+        <Input type="password" autoComplete="new-password" minLength={minimum} maxLength={256} value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!initial?.userID} />
       </Field>
       <Field label="Role">
         <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
