@@ -1670,11 +1670,15 @@ function activationDonor_(email) {
 }
 
 function activationEmail_(raw) {
-  var value = String(raw || '').trim().toLowerCase();
+  if (typeof raw !== 'string') return '';
+  var value = raw.replace(/^[\s\u200B-\u200D\u2060]+|[\s\u200B-\u200D\u2060]+$/g, '').toLowerCase();
   return value.length <= 254 && /^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(value) ? value : '';
 }
 
 function requestDonorOtp_(body) {
+  if (body.email === undefined && body.phone !== undefined) {
+    throw new Error('This page is using the old mobile activation form. Reload the login page and choose Activate with email OTP.');
+  }
   var email = activationEmail_(body.email);
   if (!email) throw new Error('Enter a valid email address.');
   var cache = CacheService.getScriptCache();

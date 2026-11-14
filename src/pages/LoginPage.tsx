@@ -211,7 +211,9 @@ function DonorActivationForm({ onDone }: { onDone: (email: string) => void }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <Field label="Email address" hint="Use the email address you gave when donating." required>
-        <Input type="email" autoComplete="email" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} readOnly={awaitingCode} required />
+        <Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(
+          e.target.value.replace(/^[\s\u200B-\u200D\u2060]+|[\s\u200B-\u200D\u2060]+$/g, '')
+        )} readOnly={awaitingCode} required />
       </Field>
       {awaitingCode && (
         <>
