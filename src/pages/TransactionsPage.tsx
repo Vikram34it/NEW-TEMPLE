@@ -5,41 +5,66 @@ import { Badge, PageHeader, Field, Input, Select, Modal, Button } from '../compo
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { formatCurrency, formatDate, todayStr } from '../utils/helpers'
-import type { Transaction } from '../types'
+import type { Donation, Expense, Transaction } from '../types'
 
 export function TransactionsPage() {
-  const { transactions, accounts, addTransaction, clearBankTransactions, user, can } = useApp()
+  const { transactions, accounts, donations, expenses, addTransaction, clearBankTransactions, user, can } = useApp()
   const [typeFilter, setTypeFilter] = useState('')
   const [accountFilter, setAccountFilter] = useState('')
+  const [query, setQuery] = useState('')
+  const [purposeFilter, setPurposeFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showRecord, setShowRecord] = useState(false)
 
+  const ledgerRows = useMemo(() => {
+    const sourceRecords = new Map<string, Donation | Expense>([
+      ...donations.map((record) => [record.donationID, record] as const),
+      ...expenses.map((record) => [record.expenseID, record] as const),
+    ])
+    return transactions.map((transaction) => {
+      const source = sourceRecords.get(transaction.referenceID)
+      return {
+        ...transaction,
+        bankCategory: transaction.bankCategory || source?.category || '',
+        bankReference: source?.transactionReference || (transaction.bankImportKey ? transaction.referenceID : ''),
+      }
+    })
+  }, [transactions, donations, expenses])
+  const purposes = [...new Set(ledgerRows.map((row) => row.bankCategory).filter(Boolean))].sort()
+  const hasFilters = Boolean(typeFilter || accountFilter || purposeFilter || dateFrom || dateTo || query)
+  const invalidRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
   const filtered = useMemo(() => {
-    return transactions.filter((t) => {
+    if (invalidRange) return []
+    const search = query.trim().toLowerCase()
+    return ledgerRows.filter((t) => {
+      if (purposeFilter && t.bankCategory !== purposeFilter) return false
+      if (search && ![t.bankReference, t.referenceID, t.description, t.account, t.bankCategory].some((value) => String(value ?? '').toLowerCase().includes(search))) return false
       if (typeFilter && t.incomeOrExpense !== typeFilter) return false
       if (accountFilter && t.account !== accountFilter) return false
       if (dateFrom && t.date < dateFrom) return false
       if (dateTo && t.date > dateTo) return false
       return true
-    })
-  }, [transactions, typeFilter, accountFilter, dateFrom, dateTo])
+    }).sort((a, b) => b.date.localeCompare(a.date))
+  }, [ledgerRows, typeFilter, accountFilter, purposeFilter, dateFrom, dateTo, query, invalidRange])
 
   const income = filtered.filter((t) => t.incomeOrExpense === 'income').reduce((s, t) => s + t.amount, 0)
   const expense = filtered.filter((t) => t.incomeOrExpense === 'expense').reduce((s, t) => s + t.amount, 0)
 
+  type LedgerRow = (typeof ledgerRows)[number]
   const exportColumns = [
     { header: 'Date', accessor: (t: Transaction) => t.date },
     { header: 'Type', accessor: (t: Transaction) => t.incomeOrExpense },
     { header: 'Amount', accessor: (t: Transaction) => t.amount },
     { header: 'Account', accessor: (t: Transaction) => t.account },
     { header: 'Reference', accessor: (t: Transaction) => t.referenceID },
-    { header: 'Bank purpose', accessor: (t: Transaction) => t.bankCategory || '' },
+    { header: 'Bank reference', accessor: (t: LedgerRow) => t.bankReference },
+    { header: 'Purpose', accessor: (t: Transaction) => t.bankCategory || '' },
     { header: 'Description', accessor: (t: Transaction) => t.description },
     { header: 'Created By', accessor: (t: Transaction) => t.createdBy },
   ]
 
-  const columns: Column<Transaction>[] = [
+  const columns: Column<LedgerRow>[] = [
     { header: 'Date', accessor: (t) => formatDate(t.date), sortable: true, sortKey: 'date' },
     { header: 'Type', accessor: (t) => <Badge color={t.incomeOrExpense === 'income' ? 'green' : 'red'}>{t.incomeOrExpense}</Badge> },
     { header: 'Amount', accessor: (t) => (
@@ -49,7 +74,8 @@ export function TransactionsPage() {
     ), sortable: true, sortKey: 'amount' },
     { header: 'Account', accessor: (t) => t.account },
     { header: 'Reference', accessor: (t) => t.referenceID },
-    { header: 'Bank purpose', accessor: (t) => t.bankCategory || '—' },
+    { header: 'Bank reference', accessor: (t) => t.bankReference || '—' },
+    { header: 'Purpose', accessor: (t) => t.bankCategory || '—' },
     { header: 'Description', accessor: (t) => <span className="max-w-[220px] truncate block">{t.description}</span> },
     { header: 'Created By', accessor: (t) => t.createdBy },
   ]
@@ -58,7 +84,7 @@ export function TransactionsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Transactions"
-        subtitle={`Income: ${formatCurrency(income)} • Expense: ${formatCurrency(expense)} • Net: ${formatCurrency(income - expense)}`}
+        subtitle={`${filtered.length.toLocaleString('en-IN')} transactions · Income: ${formatCurrency(income)} • Expense: ${formatCurrency(expense)} • Net: ${formatCurrency(income - expense)}`}
         action={
           can('*') ? (
             <div className="flex flex-wrap gap-2">
@@ -79,6 +105,12 @@ export function TransactionsPage() {
       />
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Field label="Purpose">
+          <Select value={purposeFilter} onChange={(e) => setPurposeFilter(e.target.value)}>
+            <option value="">All purposes</option>
+            {purposes.map((purpose) => <option key={purpose}>{purpose}</option>)}
+          </Select>
+        </Field>
         <Field label="Type">
           <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="">All</option>
@@ -96,14 +128,25 @@ export function TransactionsPage() {
         <Field label="To"><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field>
       </div>
 
+      {invalidRange && <p role="alert" className="text-sm text-red-700">Choose an end date on or after the start date.</p>}
       <DataTable
         columns={columns}
         data={filtered}
-        searchable
-        searchPlaceholder="Search transactions..."
+        toolbar={<>
+          <Input aria-label="Search transactions" placeholder="Search reference, description, account or purpose" className="min-w-0 flex-1" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {hasFilters && <Button variant="ghost" size="sm" onClick={() => {
+            setQuery('')
+            setTypeFilter('')
+            setAccountFilter('')
+            setPurposeFilter('')
+            setDateFrom('')
+            setDateTo('')
+          }}>Clear filters</Button>}
+        </>}
         exportFilename={`transactions-${new Date().toISOString().slice(0, 10)}.csv`}
         exportColumns={exportColumns}
-        pageSize={10}
+        pageSize={15}
+        emptyMessage="No transactions match your filters"
         rowKey={(t) => t.transactionID}
       />
 

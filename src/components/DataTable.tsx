@@ -48,7 +48,7 @@ export function DataTable<T>({
   const filtered = useMemo(() => {
     let rows = data
     if (search) {
-      const q = search.toLowerCase()
+      const q = search.trim().toLowerCase()
       rows = rows.filter((row) =>
         (Object.values(row as object)).some((v) => String(v ?? '').toLowerCase().includes(q))
       )
@@ -59,7 +59,7 @@ export function DataTable<T>({
         const bv = b[sortKey]
         if (av == null) return 1
         if (bv == null) return -1
-        const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
+        const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv), undefined, { numeric: true })
         return sortDir === 'asc' ? cmp : -cmp
       })
     }
@@ -102,6 +102,7 @@ export function DataTable<T>({
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              aria-label={searchPlaceholder}
               placeholder={searchPlaceholder}
               className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500"
             />
@@ -111,7 +112,8 @@ export function DataTable<T>({
         {exportFilename && exportColumns && (
           <button
             onClick={handleExport}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
           >
             <Download size={14} /> Export CSV
           </button>

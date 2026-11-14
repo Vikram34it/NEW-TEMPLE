@@ -3,16 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   HandCoins,
   Receipt,
-  Wallet,
   Landmark,
-  HardHat,
-  Clock,
-  TrendingUp,
-  TrendingDown,
   Plus,
   Pin,
   Heart,
-  PiggyBank,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -98,51 +92,46 @@ export function DashboardPage() {
       {/* Quick Actions */}
       {actions}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Bank Transactions" value={String(dashboard.bankCreditCount + dashboard.bankDebitCount)} icon={<Landmark size={20} />} color="blue" sub="All recorded bank credits and debits" />
-        <StatCard label="Total Bank Credits (CR)" value={formatCurrency(dashboard.bankCredits)} icon={<TrendingUp size={20} />} color="green" sub={dashboard.bankCreditCount + ' credit transactions'} />
-        <StatCard label="Total Bank Debits (DR)" value={formatCurrency(dashboard.bankDebits)} icon={<TrendingDown size={20} />} color="red" sub={dashboard.bankDebitCount + ' debit transactions'} />
-        <StatCard label="Net Bank Movement" value={formatCurrency(dashboard.bankCredits - dashboard.bankDebits)} icon={<Wallet size={20} />} color="teal" sub="Credits less debits" />
-      </div>
-
-      {/* Financial Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard label="Bank Balance" value={formatCurrency(dashboard.bankBalance)} icon={<Landmark size={20} />} color="blue" />
         <StatCard label="Total Donations" value={formatCurrency(dashboard.totalDonations)} icon={<HandCoins size={20} />} color="green" />
         <StatCard label="Total Expenses" value={formatCurrency(dashboard.totalExpenses)} icon={<Receipt size={20} />} color="red" />
-        <StatCard label="Cash Balance" value={formatCurrency(dashboard.cashBalance)} icon={<Wallet size={20} />} color="orange" />
-        <StatCard label="Bank Balance" value={formatCurrency(dashboard.bankBalance)} icon={<Landmark size={20} />} color="blue" />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard
-          label="Temple Construction Funds Received"
-          value={formatCurrency(dashboard.constructionDonations)}
-          icon={<HardHat size={20} />}
-          color="amber"
-          sub={`Spent: ${formatCurrency(dashboard.totalConstructionExpenses)} • Balance: ${formatCurrency(dashboard.constructionDonations - dashboard.totalConstructionExpenses)}`}
-        />
-        <StatCard label="Land Purchase Funds Received" value={formatCurrency(dashboard.landDonations)} icon={<Landmark size={20} />} color="amber" sub={'Spent: ' + formatCurrency(dashboard.landExpenses)} />
-        <StatCard label="Pending Payments" value={formatCurrency(dashboard.pendingPayments)} icon={<Clock size={20} />} color="violet" />
-        <StatCard label="Fixed Deposit Placements" value={formatCurrency(dashboard.totalAssets)} icon={<PiggyBank size={20} />} color="teal" sub="Recorded deposits made" />
-        <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
-        <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />
-      </div>
-
-      {/* Net position banner */}
-      <div className="rounded-xl bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500 text-white p-5 sm:p-6 shadow-lg shadow-orange-100 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-orange-100">Cash and Bank Balance</p>
-          <p className="text-3xl sm:text-4xl font-extrabold mt-1">
-            {formatCurrency(dashboard.cashBalance + dashboard.bankBalance)}
-          </p>
-          <p className="text-xs text-orange-100 mt-1">Recorded cash and bank balances</p>
+      <details className="rounded-xl border border-slate-200 bg-white">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Financial breakdown</summary>
+        <div className="grid gap-5 border-t border-slate-100 p-4 md:grid-cols-3">
+          <div>
+            <h2 className="mb-2 text-sm font-semibold text-slate-800">Bank activity</h2>
+            <dl className="space-y-2 text-sm">
+              <FinanceLine label="Credits (CR)" amount={dashboard.bankCredits} />
+              <FinanceLine label="Debits (DR)" amount={dashboard.bankDebits} />
+              <FinanceLine label="Net bank movement" amount={dashboard.bankCredits - dashboard.bankDebits} />
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-600">Transactions</dt>
+                <dd className="font-medium tabular-nums">{(dashboard.bankCreditCount + dashboard.bankDebitCount).toLocaleString('en-IN')}</dd>
+              </div>
+            </dl>
+          </div>
+          <div>
+            <h2 className="mb-2 text-sm font-semibold text-slate-800">Project funds</h2>
+            <dl className="space-y-2 text-sm">
+              <FinanceLine label="Construction received" amount={dashboard.constructionDonations} />
+              <FinanceLine label="Construction spent" amount={dashboard.totalConstructionExpenses} />
+              <FinanceLine label="Land purchase received" amount={dashboard.landDonations} />
+              <FinanceLine label="Land purchase spent" amount={dashboard.landExpenses} />
+            </dl>
+          </div>
+          <div>
+            <h2 className="mb-2 text-sm font-semibold text-slate-800">Other balances and payments</h2>
+            <dl className="space-y-2 text-sm">
+              <FinanceLine label="Cash balance" amount={dashboard.cashBalance} />
+              <FinanceLine label="Pending payments" amount={dashboard.pendingPayments} />
+              <FinanceLine label="Fixed deposit placements" amount={dashboard.totalAssets} />
+            </dl>
+          </div>
         </div>
-        <div className="grid grid-cols-3 gap-6 sm:gap-10 text-center">
-          <NetStat label="Donations" value={formatCurrency(dashboard.totalDonations)} />
-          <NetStat label="Expenses" value={formatCurrency(dashboard.totalExpenses)} />
-          <NetStat label="FD Placements" value={formatCurrency(dashboard.totalAssets)} />
-        </div>
-      </div>
+      </details>
 
       {/* Community & announcements */}
       <div className="grid lg:grid-cols-2 gap-4">
@@ -392,11 +381,11 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function NetStat({ label, value }: { label: string; value: string }) {
+function FinanceLine({ label, amount }: { label: string; amount: number }) {
   return (
-    <div>
-      <p className="text-lg sm:text-xl font-bold text-white">{value}</p>
-      <p className="text-[11px] uppercase tracking-wider text-orange-100 mt-0.5">{label}</p>
+    <div className="flex justify-between gap-3">
+      <dt className="text-slate-600">{label}</dt>
+      <dd className="text-right font-medium tabular-nums">{formatCurrency(amount)}</dd>
     </div>
   )
 }

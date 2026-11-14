@@ -154,14 +154,16 @@ export function betweenDate(dateStr: string, start: string, end: string): boolea
 
 export function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (cell: string | number) => {
-    const str = String(cell ?? '')
+    const value = String(cell ?? '')
+    // Spreadsheet apps may evaluate imported text as a formula.
+    const str = typeof cell === 'string' && (/^\s*[=+@-]/.test(value) || /^[\t\r\n]/.test(value)) ? "'" + value : value
     if (/[",\n]/.test(str)) {
       return `"${str.replace(/"/g, '""')}"`
     }
     return str
   }
 
-  const content = [headers.join(','), ...rows.map((r) => r.map(escape).join(','))].join('\n')
+  const content = [headers.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))].join('\n')
   const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

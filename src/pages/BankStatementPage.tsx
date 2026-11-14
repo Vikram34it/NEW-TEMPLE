@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Upload, FileSpreadsheet, AlertTriangle, ArrowUpCircle, ArrowDownCircle, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '../components/ui'
@@ -75,6 +76,7 @@ export function BankStatementPage() {
     [rows],
   )
   const reconciliation = useMemo(() => reconcileStatement(rows || []), [rows])
+  const hasStatementBalances = rows?.some((row) => row.runningBalance !== undefined)
   const selectedCount = useMemo(() => (rows || []).filter((r) => r.include).length, [rows])
 
   const handleFile = async (file: File | undefined) => {
@@ -288,6 +290,11 @@ export function BankStatementPage() {
 
       {rows && (
         <>
+          {hasStatementBalances && !reconciliation && (
+            <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              The running balances in this workbook do not reconcile with the parsed transactions. Review the statement before importing.
+            </p>
+          )}
           {reconciliation && (
             <Card className="p-4">
               <h2 className="font-semibold text-slate-800">Bank statement reconciliation</h2>
@@ -304,7 +311,7 @@ export function BankStatementPage() {
               {singleAccount && openingDifference !== 0 && (
                 <p className="mt-3 text-sm text-amber-800" role="status">
                   The statement opening differs from the account opening by {formatCurrency(Math.abs(openingDifference))}.
-                  Check for transactions before this statement. If this statement starts your ledger, set the account opening in Accounts to the statement opening.
+                  Check for transactions before this statement. If this statement starts your ledger, compare the opening balance in <Link className="underline" to="/accounts">Accounts</Link>.
                 </p>
               )}
             </Card>
