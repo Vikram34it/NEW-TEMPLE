@@ -98,6 +98,13 @@ export function DashboardPage() {
       {/* Quick Actions */}
       {actions}
 
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Bank Transactions" value={String(dashboard.bankCreditCount + dashboard.bankDebitCount)} icon={<Landmark size={20} />} color="blue" sub="All recorded bank credits and debits" />
+        <StatCard label="Total Bank Credits (CR)" value={formatCurrency(dashboard.bankCredits)} icon={<TrendingUp size={20} />} color="green" sub={dashboard.bankCreditCount + ' credit transactions'} />
+        <StatCard label="Total Bank Debits (DR)" value={formatCurrency(dashboard.bankDebits)} icon={<TrendingDown size={20} />} color="red" sub={dashboard.bankDebitCount + ' debit transactions'} />
+        <StatCard label="Net Bank Movement" value={formatCurrency(dashboard.bankCredits - dashboard.bankDebits)} icon={<Wallet size={20} />} color="teal" sub="Credits less debits" />
+      </div>
+
       {/* Financial Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Total Donations" value={formatCurrency(dashboard.totalDonations)} icon={<HandCoins size={20} />} color="green" />
@@ -108,14 +115,15 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
-          label="Construction Fund Received"
+          label="Temple Construction Funds Received"
           value={formatCurrency(dashboard.constructionDonations)}
           icon={<HardHat size={20} />}
           color="amber"
           sub={`Spent: ${formatCurrency(dashboard.totalConstructionExpenses)} • Balance: ${formatCurrency(dashboard.constructionDonations - dashboard.totalConstructionExpenses)}`}
         />
+        <StatCard label="Land Purchase Funds Received" value={formatCurrency(dashboard.landDonations)} icon={<Landmark size={20} />} color="amber" sub={'Spent: ' + formatCurrency(dashboard.landExpenses)} />
         <StatCard label="Pending Payments" value={formatCurrency(dashboard.pendingPayments)} icon={<Clock size={20} />} color="violet" />
-        <StatCard label="Assets (Fixed Deposits)" value={formatCurrency(dashboard.totalAssets)} icon={<PiggyBank size={20} />} color="teal" sub="Term deposits held" />
+        <StatCard label="Fixed Deposit Placements" value={formatCurrency(dashboard.totalAssets)} icon={<PiggyBank size={20} />} color="teal" sub="Recorded deposits made" />
         <StatCard label="This Month Donations" value={formatCurrency(dashboard.thisMonthDonations)} icon={<TrendingUp size={20} />} color="green" sub="Current month" />
         <StatCard label="This Month Expenses" value={formatCurrency(dashboard.thisMonthExpenses)} icon={<TrendingDown size={20} />} color="red" sub="Current month" />
       </div>
@@ -123,16 +131,16 @@ export function DashboardPage() {
       {/* Net position banner */}
       <div className="rounded-xl bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500 text-white p-5 sm:p-6 shadow-lg shadow-orange-100 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-orange-100">Net Position</p>
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-orange-100">Cash and Bank Balance</p>
           <p className="text-3xl sm:text-4xl font-extrabold mt-1">
-            {formatCurrency(dashboard.cashBalance + dashboard.bankBalance + dashboard.totalAssets)}
+            {formatCurrency(dashboard.cashBalance + dashboard.bankBalance)}
           </p>
-          <p className="text-xs text-orange-100 mt-1">Cash + bank + fixed deposits held</p>
+          <p className="text-xs text-orange-100 mt-1">Recorded cash and bank balances</p>
         </div>
         <div className="grid grid-cols-3 gap-6 sm:gap-10 text-center">
           <NetStat label="Donations" value={formatCurrency(dashboard.totalDonations)} />
           <NetStat label="Expenses" value={formatCurrency(dashboard.totalExpenses)} />
-          <NetStat label="Assets" value={formatCurrency(dashboard.totalAssets)} />
+          <NetStat label="FD Placements" value={formatCurrency(dashboard.totalAssets)} />
         </div>
       </div>
 

@@ -140,6 +140,9 @@ export interface Account {
 export type TransactionType = 'income' | 'expense'
 
 export interface Transaction {
+  bankImportKey?: string
+  accountID?: string
+  bankCategory?: string
   transactionID: string
   date: string
   type: TransactionType
@@ -185,6 +188,12 @@ export interface Settings {
 }
 
 export interface DashboardData {
+  bankCreditCount: number
+  bankDebitCount: number
+  bankCredits: number
+  bankDebits: number
+  landDonations: number
+  landExpenses: number
   totalDonations: number
   totalExpenses: number
   totalAssets: number

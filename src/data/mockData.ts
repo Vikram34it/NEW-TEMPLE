@@ -213,7 +213,7 @@ export function buildDashboardData(
 
   const recordRows: SpendRow[] = expenses.map((e) => ({ date: e.date, amount: e.amount, category: e.category }))
   const manualTxnRows: SpendRow[] = transactions
-    .filter((t) => t.incomeOrExpense === 'expense' && !/^EXP-/i.test(String(t.referenceID || '')))
+    .filter((t) => t.incomeOrExpense === 'expense' && !/^EXP-/i.test(String(t.referenceID || '')) && t.bankCategory !== 'Internal Transfer')
     .map((t) => ({
       date: t.date,
       amount: t.amount,
@@ -229,7 +229,7 @@ export function buildDashboardData(
   const totalExpenses = spendRows.reduce((s, e) => s + e.amount, 0)
 
   const constructionCategories = [
-    'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
+    'Temple Construction', 'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ]
   const totalConstructionExpenses = spendRows
@@ -238,8 +238,9 @@ export function buildDashboardData(
 
   // How much donation money has come in tagged for construction (tracking
   // only - the actual money is held in Cash / Main Bank by payment method).
+  const landPurpose = (category: string, purpose = '') => /\b(?:land|bhoomi|plot purchase)\b/i.test(category + ' ' + purpose)
   const constructionDonations = donations
-    .filter(isConstructionTagged)
+    .filter((d) => !landPurpose(d.category, d.bankImportKey ? '' : d.purpose) && isConstructionTagged({ ...d, purpose: d.bankImportKey ? '' : d.purpose }))
     .reduce((s, d) => s + d.amount, 0)
 
   // Balances mirror the reconciled ledger accounts (construction money lives in
@@ -247,6 +248,9 @@ export function buildDashboardData(
   const cashBalance = accounts.filter((a) => a.type === 'cash').reduce((sum, a) => sum + a.currentBalance, 0)
   const bankBalance = accounts.filter((a) => a.type === 'bank').reduce((sum, a) => sum + a.currentBalance, 0)
 
+  const bankNames = new Set(accounts.filter((a) => a.type === 'bank').map((a) => a.accountName))
+  const credits = transactions.filter((t) => bankNames.has(t.account) && t.incomeOrExpense === 'income')
+  const debits = transactions.filter((t) => bankNames.has(t.account) && t.incomeOrExpense === 'expense')
   const pendingTotal = pendingPayments
     .filter((p) => p.status !== 'paid')
     .reduce((s, p) => s + p.remainingAmount, 0)
@@ -296,6 +300,12 @@ export function buildDashboardData(
   }))
 
   return {
+    bankCreditCount: credits.length,
+    bankDebitCount: debits.length,
+    bankCredits: credits.reduce((sum, t) => sum + t.amount, 0),
+    bankDebits: debits.reduce((sum, t) => sum + t.amount, 0),
+    landDonations: donations.filter((d) => landPurpose(d.category, d.bankImportKey ? '' : d.purpose)).reduce((sum, d) => sum + d.amount, 0),
+    landExpenses: spendRows.filter((e) => landPurpose(e.category)).reduce((sum, e) => sum + e.amount, 0),
     totalDonations,
     totalExpenses,
     totalAssets,

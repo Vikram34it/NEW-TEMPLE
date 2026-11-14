@@ -372,12 +372,12 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>}
       <Field label="Full Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
       <Field label="Email" required><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></Field>
-      <Field label="Mobile Number" hint="Donor portal matches donations by mobile first, then email">
+      <Field label="Mobile Number" hint="For bank donations, use the verified mobile number on the donor profile.">
         <Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 9845012345" />
       </Field>
-      {!initial?.userID && (
-        <Field label="Password" required><Input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Set password" required /></Field>
-      )}
+      <Field label="Password" required={!initial?.userID} hint={initial?.userID ? 'Leave blank to keep the current password.' : 'Use at least 12 characters for a live account.'}>
+        <Input type="password" autoComplete="new-password" value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!initial?.userID} />
+      </Field>
       <Field label="Role">
         <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
           <option value="admin">Admin</option>

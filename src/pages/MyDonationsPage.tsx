@@ -1,30 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Receipt, Wallet, HeartHandshake, CalendarDays, TrendingUp } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { PageHeader, Badge, Button, StatCard } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
 import { ReceiptModal } from '../components/ReceiptModal'
-import { formatCurrency, formatDate, normalizePhone } from '../utils/helpers'
+import { formatCurrency, formatDate } from '../utils/helpers'
 import type { Donation } from '../types'
 
 export function MyDonationsPage() {
   const { user, donations, settings } = useApp()
   const [receiptDonation, setReceiptDonation] = useState<Donation | null>(null)
 
-  // A donor can only ever see their own donations. A donation belongs to the
-  // donor when it matches their mobile number (primary) OR their email (fallback).
-  const mine = useMemo(() => {
-    const meEmail = String(user?.email || '').trim().toLowerCase()
-    const mob = normalizePhone(user?.phone || '')
-    if (!meEmail && !mob) return []
-    return donations.filter((d) => {
-      if (meEmail && String(d.email || '').trim().toLowerCase() === meEmail) return true
-      if (mob && normalizePhone(d.phone || '') === mob) return true
-      return false
-    })
-  }, [donations, user?.email, user?.phone])
-
+  const mine = user?.role === 'donor' ? donations : []
   const total = mine.reduce((s, d) => s + d.amount, 0)
   const firstDate = mine.length ? new Date(Math.min(...mine.map((d) => new Date(d.date).getTime()))) : null
   const lastDate = mine.length ? new Date(Math.max(...mine.map((d) => new Date(d.date).getTime()))) : null

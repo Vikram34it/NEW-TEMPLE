@@ -134,6 +134,14 @@ server rewrites.
 - The donor portal uses the email and phone on the authenticated donor account. Keep donor identities unique. Settings and audit responses withhold secret values where applicable.
 - Bank imports store the selected account ID with each row and skip previously imported matching rows, including on retries after a partial save. The match uses account, date, direction, amount, bank reference, narration, and the occurrence among identical rows. Older imports have no stored key, so reconcile those entries before reimporting old statements.
 
+## Bank statement import and donor access
+
+Open **Bank Statement** as an administrator. Upload the bank export as .xls or .xlsx, select its bank account, and review the CR/DR and purpose categories. The importer reads Value Date, Transaction ID, Transaction Amount, Donor Name, DONATION PURPOSE, and PAID FOR EXPENSE. An optional Donor Mobile column can link a row when exactly one donor profile has that number. For a name-only row, verify the donor and select their People profile in the preview, or leave it unlinked and add the verified mobile number later by editing the donation. A matching name alone never grants portal access.
+
+The dashboard counts all posted bank credits and debits, including bank interest and fixed-deposit closures. These bank credits do not appear as donations. Land and construction cards use the assigned donation categories. Confirm the bank account opening balance is the balance immediately before the first statement you import. If a statement was previously entered with the older importer, reconcile its transactions before importing it again.
+
+Create donor accounts under **Settings > Users** using the Donor role and the same verified mobile number. Donors sign in with their mobile number and password and see their own donation records and receipts under **My Donations**. Uploaded statement rows are only saved when an administrator confirms the import.
+
 ## Available Features
 
 - **Dashboard** — financial summary cards, 5 charts, quick actions

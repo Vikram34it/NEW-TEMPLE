@@ -1,22 +1,18 @@
-import type ExcelJS from 'exceljs'
 import { parseDateInput } from './helpers'
 
 export interface BankStatementRow {
   date: string
   description: string
   reference: string
+  bankTransactionID?: string
   amount: number
   type: 'income' | 'expense'
   /** Optional donor name supplied by the bank statement's "Donor Name" column. */
   donorName?: string
+  purpose?: string
+  donorPhone?: string
   /** Optional free-text remark supplied by the statement's "Remark" column. */
   remark?: string
-}
-
-// Loaded lazily so the bulky exceljs library (already split into its own chunk
-// by the existing template code) is only fetched when a statement is parsed.
-async function loadExcelJS(): Promise<typeof ExcelJS> {
-  return (await import('exceljs')).default
 }
 
 interface ColumnMap {
@@ -28,13 +24,16 @@ interface ColumnMap {
   direction?: number
   balance?: number
   reference?: number
+  transactionID?: number
   donorName?: number
   remark?: number
+  purpose?: number
+  donorPhone?: number
 }
 
 type ColumnRole = keyof ColumnMap
 
-const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'remark', 'description', 'reference', 'direction', 'balance', 'donorName']
+const COLUMN_PRIORITY: ColumnRole[] = ['date', 'credit', 'debit', 'amount', 'purpose', 'donorPhone', 'remark', 'description', 'transactionID', 'reference', 'direction', 'balance', 'donorName']
 
 function scoreRole(role: ColumnRole, label: string): number {
   const t = String(label || '').trim()
@@ -48,12 +47,18 @@ function scoreRole(role: ColumnRole, label: string): number {
       return /amount debited|debited amount|debit amount|withdrawals/i.test(t) ? 3 : /^debit$/i.test(t) || /^withdrawal/i.test(t) ? 2 : 0
     case 'amount':
       return /^transaction amount/i.test(t) || /^amount\s*(\(|$)/i.test(t) ? 2 : 0
+    case 'purpose':
+      return /^(donation purpose|purpose)$/i.test(t) ? 3 : 0
+    case 'donorPhone':
+      return /^(donor )?(mobile|phone)( number)?$/i.test(t) ? 3 : 0
     case 'remark':
-      return /remark|note\b|comment/i.test(t) ? 3 : 0
+      return /paid for expense|expense purpose|remark|note\b|comment/i.test(t) ? 3 : 0
     case 'description':
       return /narration|particulars|transaction details|description/i.test(t) ? 3 : /details|remarks|narrative|purpose/i.test(t) ? 2 : 0
+    case 'transactionID':
+      return /^transaction\s*id$/i.test(t) ? 3 : 0
     case 'reference':
-      return /utr/i.test(t) ? 3 : /reference|cheque|txn\s*id|transaction\s*(id|no)|ref\s*(no|#|id)/i.test(t) ? 2 : 0
+      return /^transaction\s*id$/i.test(t) ? 4 : /utr/i.test(t) ? 3 : /reference|cheque|txn\s*id|transaction\s*(id|no)|ref\s*(no|#|id)/i.test(t) ? 2 : 0
     case 'direction':
       return /^[cd]r\.?$/i.test(t) || /(?:cr|dr)\s*\/\s*(?:cr|dr)/i.test(t) || /debit\s*\/\s*credit|credit\s*\/\s*debit/i.test(t) ? 2 : 0
     case 'balance':
@@ -157,35 +162,23 @@ function parseAmount(value: unknown): number {
 // Parses an uploaded bank-statement workbook (.xlsx) into transaction rows.
 // Credits become 'income', debits become 'expense'. The default account is
 // applied later by the caller; here we only extract date/narration/amounts.
-export async function parseBankStatementXlsx(data: ArrayBuffer): Promise<BankStatementRow[]> {
-  const ExcelJS = await loadExcelJS()
-  const wb = new ExcelJS.Workbook()
-  await wb.xlsx.load(data)
-
-  const result: BankStatementRow[] = []
-
-  for (const ws of wb.worksheets) {
-    const sheetResult = parseWorksheet(ws)
-    if (sheetResult.length > 0) {
-      result.push(...sheetResult)
-      break
-    }
+export async function parseBankStatement(data: ArrayBuffer): Promise<BankStatementRow[]> {
+  const { read, utils } = await import('xlsx')
+  const workbook = read(data, { type: 'array', cellDates: true })
+  for (const name of workbook.SheetNames) {
+    const cells = utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, raw: true, defval: '', blankrows: true })
+    const rows = parseWorksheet(cells)
+    if (rows.length) return rows
   }
-  return result
+  return []
 }
 
-function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
-  const maxRows = ws.rowCount
+function parseWorksheet(cells: unknown[][]): BankStatementRow[] {
+  const maxRows = cells.length
   const maxHeaderScan = Math.min(maxRows, 25)
 
   for (let scan = 1; scan <= maxHeaderScan; scan++) {
-    const headerRow = ws.getRow(scan)
-    const labels: string[] = []
-    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      void colNumber
-      labels.push(cellString(cell.value))
-    })
-    const map = pickColumns(labels)
+    const map = pickColumns(cells[scan - 1].map(cellString))
     if (!map) continue
 
     const creditCol = map.credit !== undefined ? map.credit : undefined
@@ -193,14 +186,17 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
 
     const rows: BankStatementRow[] = []
     for (let r = scan + 1; r <= maxRows; r++) {
-      const row = ws.getRow(r)
-      const get = (col?: number): unknown => (col !== undefined ? row.getCell(col)?.value : undefined)
+      const row = cells[r - 1]
+      const get = (col?: number): unknown => col === undefined ? undefined : row[col - 1]
 
       const date = parseCellDate(get(map.date))
-      if (!date) continue
+      if (!date) {
+        if (map.purpose !== undefined && /^(cr|dr)$/i.test(cellString(get(map.direction)).trim())) throw new Error('Invalid value date in worksheet row ' + r)
+        continue
+      }
 
       let description = cellString(get(map.description)).trim()
-      const reference = cellString(get(map.reference)).trim()
+      const reference = cellString(get(map.transactionID ?? map.reference)).trim()
       if (!description) description = reference
 
       const donorName = map.donorName !== undefined ? cellString(get(map.donorName)).trim() : ''
@@ -221,7 +217,10 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
         }
       } else if (map.amount !== undefined) {
         const raw = parseAmount(get(map.amount))
-        if (isNaN(raw)) continue
+        if (!Number.isFinite(raw) || raw === 0) {
+          if (reference && map.purpose !== undefined) throw new Error('Invalid amount in worksheet row ' + r)
+          continue
+        }
         if (map.direction !== undefined) {
           const dir = cellString(get(map.direction)).trim().toLowerCase()
           if (dir.includes('cr')) {
@@ -231,6 +230,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
             amount = Math.abs(raw)
             type = 'expense'
           } else {
+            if (reference && map.purpose !== undefined) throw new Error('Invalid CR/DR in worksheet row ' + r)
             amount = Math.abs(raw)
             type = raw >= 0 ? 'income' : 'expense'
           }
@@ -241,7 +241,7 @@ function parseWorksheet(ws: ExcelJS.Worksheet): BankStatementRow[] {
       }
 
       if (type === null || !Number.isFinite(amount) || amount <= 0) continue
-      rows.push({ date, description, reference, amount, type, donorName, remark })
+      rows.push({ date, description, reference, amount, type, donorName, remark, bankTransactionID: cellString(get(map.transactionID)).trim(), purpose: cellString(get(map.purpose)).trim(), donorPhone: cellString(get(map.donorPhone)).trim() })
     }
     if (rows.length > 0) return rows
   }

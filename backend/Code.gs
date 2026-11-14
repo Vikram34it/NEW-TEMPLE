@@ -176,7 +176,7 @@ var HEADERS = {
   projects: ['ProjectID', 'ProjectName', 'Description', 'StartDate', 'EstimatedBudget', 'ActualExpense', 'Status', 'Contractor'],
   payments: ['PaymentID', 'Date', 'PersonOrVendor', 'AmountDue', 'AmountPaid', 'RemainingAmount', 'DueDate', 'Project', 'Status', 'Notes'],
   accounts: ['AccountID', 'AccountName', 'OpeningBalance', 'CurrentBalance', 'Type', 'Notes'],
-  transactions: ['TransactionID', 'Date', 'Type', 'IncomeOrExpense', 'Amount', 'Account', 'ReferenceID', 'Description', 'CreatedBy'],
+  transactions: ['TransactionID', 'Date', 'Type', 'IncomeOrExpense', 'Amount', 'Account', 'ReferenceID', 'Description', 'CreatedBy', 'AccountID', 'BankImportKey', 'BankCategory'],
   audit: ['LogID', 'DateTime', 'User', 'Action', 'Module', 'RecordID', 'OldValue', 'NewValue'],
   announcements: ['AnnouncementID', 'Title', 'Body', 'PostedBy', 'PostedAt', 'Pinned', 'ExpiresAt', 'Status', 'Deleted'],
   messages: ['MessageID', 'SenderEmail', 'SenderName', 'RecipientEmail', 'Subject', 'Body', 'SentAt', 'Read', 'ReadAt', 'DeletedBySender', 'DeletedByRecipient'],
@@ -304,7 +304,7 @@ function donationsFor_(user) {
   });
   var email = String(user.Email || '').trim();
   if (!email && !normalizePhone_(user.Phone)) return [];
-  return readDonations_(email, user.Phone);
+  return readDonations_(email, user.Phone, true);
 }
 
 function peopleFor_(user) {
@@ -1012,17 +1012,15 @@ function readAll_(sheetName, headers) {
 //
 // Matching priority: mobile number first (it is usually recorded and unique),
 // then email as a fallback. A donation is returned if EITHER matches.
-function readDonations_(meEmail, mobPhone) {
+function readDonations_(meEmail, mobPhone, donorPortal) {
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
   var meNorm = meEmail ? String(meEmail).toLowerCase() : '';
   var mobNorm = mobPhone ? normalizePhone_(mobPhone) : '';
   if (!meNorm && !mobNorm) return donations;
   return donations.filter(function (d) {
-    if (meNorm && String(d.Email || '').trim().toLowerCase() === meNorm) return true;
-    if (mobNorm) {
-      var dPhone = String(d.Phone || '');
-      if (dPhone && normalizePhone_(dPhone) === mobNorm) return true;
-    }
+    var dPhone = normalizePhone_(d.Phone);
+    if (mobNorm && dPhone) return dPhone === mobNorm;
+    if (meNorm && (!donorPortal || !d.BankImportKey) && String(d.Email || '').trim().toLowerCase() === meNorm) return true;
     return false;
   });
 }
@@ -1157,9 +1155,16 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   });
 
   var importKeys = Object.create(null);
-  data.forEach(function (row) { if (row.BankImportKey) importKeys[row.BankImportKey] = true; });
-  var importAccounts = records.some(function (record) { return record && record.BankImportKey; })
-    ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
+  var hasBankRows = records.some(function (record) { return record && record.BankImportKey; });
+  var importAccounts = hasBankRows ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
+  var importPeople = hasBankRows && module === 'donation' ? readAll_(CONFIG.sheetNames.people, HEADERS.people) : [];
+  if (hasBankRows) {
+    ['donations', 'expenses', 'transactions'].forEach(function (key) {
+      var name = CONFIG.sheetNames[key];
+      var existing = name === sheetName ? data : tableData_(name, HEADERS[key]);
+      existing.forEach(function (row) { if (row.BankImportKey) importKeys[row.BankImportKey] = true; });
+    });
+  }
 
   // 2. Generate all IDs sequentially without re-reading the sheet.
   var rows = [];
@@ -1174,10 +1179,17 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     validateRecord_(record, required || []);
     if (record.BankImportKey) {
       if (Number(record.Amount) <= 0) throw new Error('Bank import amount must be positive');
-      if (module !== 'donation' && module !== 'expense') throw new Error('Invalid bank import type');
+      if (module === 'transaction') {
+        var validCredit = ['Fixed Deposit Closure', 'Bank Interest', 'Internal Transfer', 'Unclassified Credit', 'Other Bank Credit'].indexOf(record.BankCategory) >= 0;
+        if (!(record.IncomeOrExpense === 'income' && validCredit) &&
+            !(record.IncomeOrExpense === 'expense' && record.BankCategory === 'Internal Transfer')) {
+          throw new Error('Invalid bank movement category or direction');
+        }
+      }
       if (!/^[a-f0-9]{64}$/.test(record.BankImportKey)) throw new Error('Invalid bank import key');
       if (importKeys[record.BankImportKey]) continue;
-      if (!importAccounts.some(function (account) { return String(account.AccountID) === String(record.AccountID); })) {
+      if (module === 'donation') linkImportedDonor_(record, importPeople);
+      if (!importAccounts.some(function (account) { return String(account.AccountID) === String(record.AccountID) && String(account.Type).toLowerCase() === 'bank'; })) {
         throw new Error('Bank import account no longer exists');
       }
       importKeys[record.BankImportKey] = true;
@@ -1246,6 +1258,14 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
 
   // Return the created records with their IDs
   return { created: accepted.length, skipped: records.length - accepted.length, prefix: prefix };
+}
+
+function linkImportedDonor_(record, people) {
+  var person = people.find(function (p) { return String(p.PersonID) === String(record.DonorID) && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(p.PersonType)); });
+  if (record.DonorID && !person) throw new Error('Linked donor profile no longer exists');
+  record.Phone = person ? person.Phone : '';
+  record.Email = person ? person.Email : '';
+  if (person) record.DonorName = person.Name;
 }
 
 function readRowById_(sheetName, headers, idCol, id, row, rowNumber) {
@@ -1574,7 +1594,7 @@ function buildDashboard_() {
   var projects = readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
 
   var constructionCategories = [
-    'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
+    'Temple Construction', 'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ];
 
@@ -1595,7 +1615,7 @@ function buildDashboard_() {
   var ledgerSpends = transactions
     .filter(function (t) {
       var ref = String(t.ReferenceID || '').toUpperCase();
-      return String(t.IncomeOrExpense) === 'expense' && ref.indexOf('EXP-') !== 0;
+      return String(t.IncomeOrExpense) === 'expense' && ref.indexOf('EXP-') !== 0 && t.BankCategory !== 'Internal Transfer';
     });
 
   var assetRows = expenseRecords
@@ -1620,12 +1640,17 @@ function buildDashboard_() {
   // How much donation money has come in tagged for construction (tracking only
   // - the actual money is held in Cash / Main Bank by payment method).
   var constructionDonations = donations
-    .filter(function (d) { return isConstructionTagged_(d.Category, d.Purpose, ''); })
+    .filter(function (d) { var purpose = d.BankImportKey ? '' : d.Purpose;
+      return !isLandPurchase_(d.Category, purpose) && isConstructionTagged_(d.Category, purpose, ''); })
     .reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
 
   var cash = accounts.filter(function (a) { return String(a.Type).toLowerCase() === 'cash'; });
   var bank = accounts.filter(function (a) { return String(a.Type).toLowerCase() === 'bank'; });
 
+  var bankNames = bank.map(function (a) { return a.AccountName; });
+  var bankRows = transactions.filter(function (t) { return bankNames.indexOf(t.Account) >= 0; });
+  var credits = bankRows.filter(function (t) { return t.IncomeOrExpense === 'income'; });
+  var debits = bankRows.filter(function (t) { return t.IncomeOrExpense === 'expense'; });
   var pendingTotal = payments
     .filter(function (p) { return p.Status !== 'paid'; })
     .reduce(function (s, p) { return s + toNum_(p.RemainingAmount); }, 0);
@@ -1636,6 +1661,12 @@ function buildDashboard_() {
   var thisMonthExpenses = expenseRows.filter(function (e) { return String(e.Date).indexOf(thisMonth) === 0; }).reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
 
   return {
+    bankCreditCount: credits.length,
+    bankDebitCount: debits.length,
+    bankCredits: sumBy_(credits, 'Amount'),
+    bankDebits: sumBy_(debits, 'Amount'),
+    landDonations: sumBy_(donations.filter(function (d) { return isLandPurchase_(d.Category, d.BankImportKey ? '' : d.Purpose); }), 'Amount'),
+    landExpenses: sumBy_(expenseRows.filter(function (e) { return isLandPurchase_(e.Category, ''); }), 'Amount'),
     totalDonations: totalDonations,
     totalExpenses: totalExpenses,
     totalAssets: totalAssets,
@@ -1746,6 +1777,10 @@ var CONSTRUCTION_HINTS_ = [
   'plumbing', 'painting', 'marble', 'woodwork', 'equipment', 'transportation'
 ];
 
+function isLandPurchase_(category, purpose) {
+  return /\b(?:land|bhoomi|plot purchase)\b/i.test(String(category || '') + ' ' + String(purpose || ''));
+}
+
 function isConstructionTagged_(category, purpose, projectName) {
   var hint = (String(category || '') + ' ' + String(purpose || '') + ' ' + String(projectName || '')).toLowerCase();
   for (var k = 0; k < CONSTRUCTION_HINTS_.length; k++) {
@@ -1796,6 +1831,7 @@ function ensureRowCapacity_(sheet, lastRow) {
 function reconcileLedger_() {
   var txSheet = sheet_(CONFIG.sheetNames.transactions);
   var txHeader = HEADERS.transactions;
+  ensureColumnCapacity_(txSheet, txHeader.length);
   var txData = tableData_(CONFIG.sheetNames.transactions, txHeader);
 
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
@@ -1841,6 +1877,7 @@ function reconcileLedger_() {
   var rows = [];
   manual.forEach(function (m) {
     if (!m || !m.TransactionID) return;
+    if (m.BankImportKey && m.AccountID) m.Account = ledgerAccount_(m, accounts);
     rows.push(txHeader.map(function (h) { return m[h] === undefined ? '' : sheetValue_(m[h]); }));
     var tm = String(m.TransactionID || '').match(/TXN-(\d+)/);
     if (tm) { var n = parseInt(tm[1], 10); if (n > nextTxnNum) nextTxnNum = n; }
@@ -1850,7 +1887,7 @@ function reconcileLedger_() {
     rows.push([
       'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
-      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy),
+      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy), '', '', '',
     ]);
   });
 

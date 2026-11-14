@@ -455,7 +455,7 @@ export const dataService = {
     }
     // Mock mode: create each record individually
     const results: unknown[] = []
-    const keys = new Set((mockStore.data[record] as Array<{ bankImportKey?: string }>).map((item) => item.bankImportKey))
+    const keys = new Set((['donations', 'expenses', 'transactions'] as const).flatMap((name) => (mockStore.data[name] as Array<{ bankImportKey?: string }>).map((item) => item.bankImportKey)))
     for (const item of items) {
       const key = typeof item.bankImportKey === 'string' ? item.bankImportKey : ''
       if (key && keys.has(key)) continue
@@ -515,7 +515,13 @@ export const dataService = {
   },
   async getDonations(me?: string, mob?: string): Promise<Donation[]> {
     const all = (await api.load('donations', me || mob ? { me: me || '', mob: mob || '' } : {})) as Donation[]
-    return all.filter((d) => !d.deleted)
+    return all.filter((d) => {
+      if (d.deleted) return false
+      if (!CONFIG.useMockData || (!me && !mob)) return true
+      const phone = normalizePhone(mob || '')
+      const recorded = normalizePhone(d.phone || '')
+      return phone && recorded ? phone === recorded : !d.bankImportKey && !!me && String(d.email || '').toLowerCase() === me.toLowerCase()
+    })
   },
   async getExpenses(): Promise<Expense[]> {
     const all = (await api.load('expenses')) as Expense[]

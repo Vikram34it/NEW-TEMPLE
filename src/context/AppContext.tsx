@@ -238,8 +238,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 4500)
   }
 
-  const liveUserID = CONFIG_USE_LIVE ? user?.userID : undefined
-
   async function refreshAll(): Promise<void> {
     if (CONFIG_USE_LIVE && !user) return
     const isDonor = user?.role === 'donor'
@@ -342,7 +340,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveUserID])
+  }, [user?.userID])
 
   useEffect(() => {
     const expire = () => {
@@ -396,7 +394,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return new Promise((resolve) => {
       const finish = (msg: string | null, u: User | null) => {
         if (!msg && u) {
-          if (CONFIG_USE_LIVE) setLoading(true)
+          setLoading(true)
           setUser(u)
           storeSessionUser(u)
           audit('Login', 'Auth', u.userID)
@@ -602,24 +600,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ---- Transactions ----
   async function bulkAddTransactions(items: Array<Omit<Transaction, 'transactionID'>>): Promise<Transaction[]> {
-    const isLive = CONFIG_USE_LIVE
-    const created: Transaction[] = []
+    if (!items.length) return []
     try {
-      if (isLive) {
-        // Live mode: send all records in a single HTTP request.
-        if (items.length > 0) {
-          await dataService.bulkPersist('transactions', items as Array<Record<string, unknown>>)
-        }
-      } else {
-        for (const item of items) {
-          Object.assign(item, { transactionID: `TXN-2026-${String(nextSeq() + 1).padStart(4, '0')}` } as Partial<Transaction>)
-          created.push((await dataService.persist('transactions', 'create', { ...item })) as Transaction)
-        }
+      if (CONFIG_USE_LIVE) {
+        const result = await dataService.bulkPersist('transactions', items) as { created: number; skipped: number }
+        notify('success', bulkSaveMessage('bank movements', result.created, result.skipped))
+        await refreshAllSafe()
+        return []
       }
-      notify('success', `${items.length} transaction${items.length === 1 ? '' : 's'} imported`)
+      const records = items.map((item) => ({ ...item, transactionID: 'TXN-' + nextSeq() }))
+      const created = await dataService.bulkPersist('transactions', records) as Transaction[]
+      notify('success', bulkSaveMessage('bank movements', created.length, items.length - created.length))
       await refreshAll()
-      if (!isLive) audit('BulkCreate', 'Transactions', `${created.length} records`)
-      return isLive ? [] : created
+      return created
     } catch (err) {
       notify('error', errMsg(err))
       await refreshAllSafe()

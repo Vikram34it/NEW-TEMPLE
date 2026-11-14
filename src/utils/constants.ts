@@ -1,5 +1,6 @@
 export const DONATION_CATEGORIES = [
   'General Donation',
+  'Land Purchase',
   'Temple Construction',
   'Deity Worship',
   'Annadanam / Food Distribution',
@@ -20,6 +21,8 @@ export const PAYMENT_METHODS = [
 ] as const
 
 export const CONSTRUCTION_EXPENSE_CATEGORIES = [
+  'Temple Construction',
+  'Land Purchase',
   'Cement',
   'Steel',
   'Sand',
@@ -44,6 +47,10 @@ export const OPERATIONS_EXPENSE_CATEGORIES = [
   'Travel',
   'Festivals',
   'Office Expenses',
+  'Bank Charges',
+  'Fixed Deposit',
+  'Unclassified Expense',
+  'Other',
 ] as const
 
 export const PERSON_TYPES = [

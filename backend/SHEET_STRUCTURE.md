@@ -56,7 +56,7 @@ AccountID | AccountName | OpeningBalance | CurrentBalance | Type | Notes
 Account types: `cash`, `bank`, `construction`, `donation`.
 
 ## 9. Transactions
-TransactionID | Date | Type | IncomeOrExpense | Amount | Account | ReferenceID | Description | CreatedBy
+TransactionID | Date | Type | IncomeOrExpense | Amount | Account | ReferenceID | Description | CreatedBy | AccountID | BankImportKey | BankCategory
 
 Every donation creates an `income` transaction; every expense creates an
 `expense` transaction. Balances are derived from these (not manually edited).

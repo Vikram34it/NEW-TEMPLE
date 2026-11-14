@@ -135,7 +135,7 @@ export function LoginPage() {
             </Button>
           </form>
 
-          {mode !== 'donor' && (
+          {mode !== 'donor' && CONFIG.useMockData && (
             <div className="mt-5 pt-4 border-t border-slate-100 text-center">
               <button
                 type="button"

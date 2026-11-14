@@ -2,15 +2,19 @@ import { useMemo, useRef, useState } from 'react'
 import { Upload, FileSpreadsheet, AlertTriangle, ArrowUpCircle, ArrowDownCircle, CheckCircle2 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select } from '../components/ui'
-import { parseBankStatementXlsx, type BankStatementRow } from '../utils/bankStatement'
-import { formatCurrency, formatDate } from '../utils/helpers'
-import type { Donation, Expense, Person } from '../types'
+import { parseBankStatement, type BankStatementRow } from '../utils/bankStatement'
+import { formatCurrency, formatDate, normalizePhone } from '../utils/helpers'
+import type { Donation, Expense, Person, Transaction } from '../types'
+import { bankPurpose, isBankOnlyCategory } from '../utils/bankPurpose'
+import { CONSTRUCTION_EXPENSE_CATEGORIES, DONATION_CATEGORIES, OPERATIONS_EXPENSE_CATEGORIES } from '../utils/constants'
 
 interface PreviewRow extends BankStatementRow {
   key: string
   importIdentity: string
   include: boolean
   account: string
+  category: string
+  donorID: string
   donorName: string
   /** Free-text remark shown for debit (Dr) rows; used as the txn description. */
   remark: string
@@ -27,15 +31,11 @@ function paymentMethodFromDescription(description: string): Donation['paymentMet
   return 'Other'
 }
 
-// Fixed-deposit narrations contain "FD" or "fixed deposit" — these are
-// assets, not expenses, and get their own dashboard card.
-const FD_REGEX = /\bfd\b|fixed\s*deposit/i
-function isFixedDeposit(description: string, remark: string): boolean {
-  return FD_REGEX.test(description) || FD_REGEX.test(remark)
-}
+const incomeCategories = [...DONATION_CATEGORIES, 'Fixed Deposit Closure', 'Bank Interest', 'Internal Transfer', 'Unclassified Credit', 'Other Bank Credit']
+const expenseCategories = [...CONSTRUCTION_EXPENSE_CATEGORIES, ...OPERATIONS_EXPENSE_CATEGORIES, 'Internal Transfer']
 
 export function BankStatementPage() {
-  const { accounts, people, bulkAddDonations, bulkAddExpenses, user, can } = useApp()
+  const { accounts, people, bulkAddDonations, bulkAddExpenses, bulkAddTransactions, user, can } = useApp()
   const fileRef = useRef<HTMLInputElement>(null)
   const [rows, setRows] = useState<PreviewRow[] | null>(null)
   const [fileName, setFileName] = useState('')
@@ -43,6 +43,7 @@ export function BankStatementPage() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [allAccount, setAllAccount] = useState('')
+  const [filter, setFilter] = useState('all')
 
   const donors = useMemo<Person[]>(
     () =>
@@ -53,9 +54,10 @@ export function BankStatementPage() {
     [people],
   )
 
+  const bankAccounts = useMemo(() => accounts.filter((account) => account.type === 'bank'), [accounts])
   const defaultAccount = useMemo(
-    () => accounts.find((a) => a.type === 'bank')?.accountID ?? accounts[0]?.accountID ?? '',
-    [accounts],
+    () => bankAccounts[0]?.accountID ?? '',
+    [bankAccounts],
   )
 
   const incomeTotal = useMemo(
@@ -66,8 +68,10 @@ export function BankStatementPage() {
     () => (rows || []).filter((r) => r.include && r.type === 'expense').reduce((s, r) => s + r.amount, 0),
     [rows],
   )
+  const [page, setPage] = useState(0)
+  const [query, setQuery] = useState('')
   const donorTaggedCount = useMemo(
-    () => (rows || []).filter((r) => r.include && r.type === 'income' && r.donorName?.trim()).length,
+    () => (rows || []).filter((r) => r.include && r.type === 'income' && !isBankOnlyCategory(r.category) && r.donorID).length,
     [rows],
   )
   const selectedCount = useMemo(() => (rows || []).filter((r) => r.include).length, [rows])
@@ -75,14 +79,14 @@ export function BankStatementPage() {
   const handleFile = async (file: File | undefined) => {
     if (!file) return
     setError('')
-    if (!/\.xlsx$/i.test(file.name)) {
-      setError('Please upload the bank statement saved as an .xlsx (Excel) file.')
+    if (!/\.xlsx?$/i.test(file.name)) {
+      setError('Please upload the bank statement as an .xls or .xlsx file.')
       return
     }
     setParsing(true)
     try {
       const buffer = await file.arrayBuffer()
-      const parsed = await parseBankStatementXlsx(buffer)
+      const parsed = await parseBankStatement(buffer)
       if (parsed.length === 0) {
         throw new Error(
           'No transaction rows were recognised. Make sure the sheet has date and amount columns (e.g. Value Date, Description, Cr/Dr and Transaction Amount).',
@@ -94,20 +98,27 @@ export function BankStatementPage() {
       const occurrences = new Map<string, number>()
       setRows(
         parsed.map((r, i) => {
-          const identity = JSON.stringify([r.date, r.type, r.amount, r.reference, r.description])
+          const identity = r.bankTransactionID ? JSON.stringify(['bank-transaction', r.bankTransactionID]) : JSON.stringify([r.date, r.type, r.amount, r.reference, r.description])
           const occurrence = (occurrences.get(identity) ?? 0) + 1
           occurrences.set(identity, occurrence)
+          const phone = normalizePhone(r.donorPhone || '')
+          const matches = phone ? donors.filter((donor) => normalizePhone(donor.phone) === phone) : []
           return {
             ...r,
+            category: bankPurpose(r.type, (r.type === 'income' ? r.purpose : r.remark) || '', r.description, Boolean(r.donorName || phone)),
+            donorID: matches.length === 1 ? matches[0].personID : '',
             key: `row-${i}`,
             include: true,
             account,
             donorName: r.type === 'income' ? (r.donorName || '').trim() : '',
             remark: (r.remark || '').trim(),
-            importIdentity: JSON.stringify([identity, occurrence]),
+            importIdentity: r.bankTransactionID ? identity : JSON.stringify([identity, occurrence]),
           }
         }),
       )
+      setFilter('all')
+      setQuery('')
+      setPage(0)
       setAllAccount(account)
       setFileName(file.name)
     } catch (err) {
@@ -128,11 +139,12 @@ export function BankStatementPage() {
   }
 
   const toggleAll = (checked: boolean) => {
-    setRows((rs) => (rs || []).map((r) => ({ ...r, include: checked })))
+    const visible = new Set(visibleRows.map((row) => row.key))
+    setRows((rs) => (rs || []).map((row) => visible.has(row.key) ? { ...row, include: checked } : row))
   }
 
-  const setDonorName = (key: string, donorName: string) => {
-    setRows((rs) => (rs || []).map((r) => (r.key === key ? { ...r, donorName } : r)))
+  const changeRow = (key: string, changes: Partial<PreviewRow>) => {
+    setRows((rs) => (rs || []).map((r) => r.key === key ? { ...r, ...changes } : r))
   }
 
   const setRemark = (key: string, remark: string) => {
@@ -145,19 +157,10 @@ export function BankStatementPage() {
     setError('')
     setImporting(true)
     try {
-      // All income rows become proper donation records (receipts, donor
-      // portal, reports) using the donor name typed in the preview. If the
-      // name matches a known donor we also link the record (donorID + contact
-      // details); otherwise the typed name is kept and the record is tagged to
-      // an "Unknown / walk-in" donor so it still shows in the Donations tab.
-      // Debit rows become expense records too, so they count towards the
-      // dashboard "Total Expenses" and show up in the Expenses page. The
-      // selected account drives the payment method (Cash rows post as cash,
-      // everything else is derived from the narration).
       const donations: Array<Omit<Donation, 'donationID' | 'receiptNumber'>> = []
       const expenses: Array<Omit<Expense, 'expenseID'>> = []
-      const normalize = (name: string) => String(name || '').toLowerCase().replace(/\s+/g, ' ').trim()
-      const donorsByName = new Map(donors.map((d) => [normalize(d.name), d]))
+      const bankMovements: Array<Omit<Transaction, 'transactionID'>> = []
+      const donorsByID = new Map(donors.map((donor) => [donor.personID, donor]))
 
       const paymentMethodFor = (r: PreviewRow): Expense['paymentMethod'] => {
         const acct = accounts.find((a) => a.accountID === r.account)
@@ -166,7 +169,7 @@ export function BankStatementPage() {
       }
 
       const importFields = await Promise.all(selected.map(async (row) => {
-        if (!accounts.some((account) => account.accountID === row.account)) {
+        if (!bankAccounts.some((account) => account.accountID === row.account)) {
           throw new Error('Choose a valid account for each selected row.')
         }
         const identity = new TextEncoder().encode(JSON.stringify([row.account, row.importIdentity]))
@@ -175,20 +178,24 @@ export function BankStatementPage() {
         return { accountID: row.account, bankImportKey }
       }))
       for (const [index, r] of selected.entries()) {
-        if (r.type === 'income') {
+        if (isBankOnlyCategory(r.category)) {
+          bankMovements.push({ ...importFields[index], date: r.date, type: r.type, incomeOrExpense: r.type,
+            amount: r.amount, account: accounts.find((a) => a.accountID === r.account)!.accountName,
+            referenceID: r.reference, description: r.description, bankCategory: r.category, createdBy: user?.name || '' })
+        } else if (r.type === 'income') {
           const typedName = (r.donorName || '').trim()
-          const donor = donorsByName.get(normalize(typedName))
+          const donor = donorsByID.get(r.donorID)
           donations.push({
             ...importFields[index],
             date: r.date,
             donorID: donor ? donor.personID : '',
-            donorName: typedName || (donor ? donor.name : 'Unknown Donor'),
+            donorName: donor?.name || typedName || 'Unknown Donor',
             phone: donor?.phone || '',
             email: donor?.email || '',
             address: donor?.address || '',
             amount: r.amount,
-            category: 'General Donation',
-            purpose: '',
+            category: r.category,
+            purpose: r.purpose || '',
             paymentMethod: paymentMethodFor(r),
             transactionReference: r.reference || '',
             receivedBy: user?.name || '',
@@ -198,7 +205,7 @@ export function BankStatementPage() {
           expenses.push({
             ...importFields[index],
             date: r.date,
-            category: isFixedDeposit(r.description, r.remark) ? 'Fixed Deposit' : 'Other',
+            category: r.category,
             description: (r.remark || '').trim() || r.description || 'Bank debit',
             amount: r.amount,
             paymentMethod: paymentMethodFor(r),
@@ -210,29 +217,33 @@ export function BankStatementPage() {
             projectName: '',
             approvedBy: user?.name || '',
             paidBy: user?.name || '',
-            notes: '',
+            notes: r.description,
           })
         }
       }
 
       if (donations.length > 0) await bulkAddDonations(donations)
       if (expenses.length > 0) await bulkAddExpenses(expenses)
+      if (bankMovements.length > 0) await bulkAddTransactions(bankMovements)
       setRows(null)
       setFileName('')
-    } catch {
-      // error messages are toasted by the context; keep the preview so nothing is lost
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Statement import failed.')
     } finally {
       setImporting(false)
     }
   }
 
-  const allChecked = (rows || []).length > 0 && (rows || []).every((r) => r.include)
+  const search = query.trim().toLowerCase()
+  const filteredRows = (rows || []).filter((row) => !search || [row.reference, row.description, row.donorName, row.category, row.purpose, row.remark].some((value) => value?.toLowerCase().includes(search))).filter((r) => filter === 'all' || (filter === 'unlinked' ? r.type === 'income' && !r.donorID && !isBankOnlyCategory(r.category) : filter === 'review' ? r.category.startsWith('Unclassified') : r.type === filter))
+  const visibleRows = filteredRows.slice(page * 50, (page + 1) * 50)
+  const allChecked = visibleRows.length > 0 && visibleRows.every((r) => r.include)
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Bank Statement Import"
-        subtitle="Upload the bank's Excel statement — every credit becomes an income transaction and every debit an expense. Type a donor name for each credit to record it as a donation."
+        subtitle="Review and import bank credits, debits, and their purposes."
       />
 
       {error && (
@@ -248,7 +259,7 @@ export function BankStatementPage() {
             <input
               ref={fileRef}
               type="file"
-              accept=".xlsx"
+              accept=".xls,.xlsx"
               className="hidden"
               onChange={(e) => void handleFile(e.target.files?.[0])}
             />
@@ -257,7 +268,7 @@ export function BankStatementPage() {
             </div>
             <div>
               <p className="font-semibold text-slate-700">{parsing ? 'Reading statement…' : 'Click to choose the statement file'}</p>
-              <p className="text-xs text-slate-400 mt-1">Excel (.xlsx) export from your bank / netbanking</p>
+              <p className="text-xs text-slate-400 mt-1">Excel (.xls or .xlsx) export from your bank / netbanking</p>
             </div>
             <p className="text-[11px] text-slate-400 max-w-md">
               Columns are auto-detected — the sheet needs a <strong>Date</strong> column (e.g. Value Date), a{' '}
@@ -289,14 +300,14 @@ export function BankStatementPage() {
               </p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-slate-500">Donor tagged</p>
+              <p className="text-xs text-slate-500">Linked to a donor</p>
               <p className="text-2xl font-bold text-slate-800">{donorTaggedCount}</p>
-              <p className="text-[11px] text-slate-400">become donation records with receipts</p>
+              <p className="text-[11px] text-slate-400">can appear in the donor portal once the mobile number matches</p>
             </Card>
             <Card className="p-4">
-              <p className="text-xs text-slate-500">Book untagged rows to account</p>
+              <p className="text-xs text-slate-500">Bank account for selected rows</p>
               <Select value={allAccount} onChange={(e) => applyAccountToAll(e.target.value)} className="mt-1.5">
-                {accounts.map((a) => (
+                {bankAccounts.map((a) => (
                   <option key={a.accountID} value={a.accountID}>{a.accountName}</option>
                 ))}
               </Select>
@@ -312,24 +323,31 @@ export function BankStatementPage() {
             </Card>
           </div>
 
+          <div className="grid gap-2 sm:grid-cols-2">
+          <Input value={query} aria-label="Search statement" placeholder="Find by transaction ID, donor or purpose" onChange={(e) => { setQuery(e.target.value); setPage(0) }} />
+          <Select aria-label="Filter statement preview" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0) }}>
+            <option value="all">All statement rows</option><option value="income">Credits (CR)</option><option value="expense">Debits (DR)</option><option value="review">Unclassified</option><option value="unlinked">Donations without a donor profile</option>
+          </Select>
+          </div>
           <Card className="p-0 overflow-hidden">
             <div className="max-h-[560px] overflow-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0">
                   <tr>
                     <th className="text-left py-3 px-4 w-10">
-                      <input type="checkbox" checked={allChecked} onChange={(e) => toggleAll(e.target.checked)} />
+                      <input aria-label="Select rows on this page" type="checkbox" checked={allChecked} onChange={(e) => toggleAll(e.target.checked)} />
                     </th>
                     <th className="text-left py-3 px-2 font-medium">Date</th>
                     <th className="text-left py-3 px-2 font-medium">Description</th>
                     <th className="text-left py-3 px-2 font-medium">Type</th>
                     <th className="text-right py-3 px-2 font-medium">Amount</th>
                     <th className="text-left py-3 px-2 font-medium">Account</th>
-                    <th className="text-left py-3 px-4 font-medium">Donor name / Remark</th>
+                    <th className="text-left py-3 px-2 font-medium">Purpose category</th>
+                    <th className="text-left py-3 px-4 font-medium">Donor / Expense details</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {visibleRows.map((r) => (
                     <tr key={r.key} className={`border-t border-slate-100 ${r.include ? '' : 'opacity-50'}`}>
                       <td className="py-2 px-4">
                         <input type="checkbox" checked={r.include} onChange={() => toggleRow(r.key)} />
@@ -340,26 +358,33 @@ export function BankStatementPage() {
                         {r.reference && <span className="text-[11px] text-slate-400">Ref: {r.reference}</span>}
                       </td>
                       <td className="py-2 px-2">
-                        <Badge color={r.type === 'income' ? 'green' : 'red'}>{r.type}</Badge>
+                        <Badge color={r.type === 'income' ? 'green' : 'red'}>{r.type === 'income' ? 'CR' : 'DR'}</Badge>
                       </td>
                       <td className={`py-2 px-2 text-right font-semibold whitespace-nowrap ${r.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
                         {formatCurrency(r.amount)}
                       </td>
                       <td className="py-2 px-2">
                         <Select value={r.account} onChange={(e) => setRows((rs) => (rs || []).map((x) => (x.key === r.key ? { ...x, account: e.target.value } : x)))} className="!py-1 text-xs">
-                          {accounts.map((a) => (
-                            <option key={a.accountID} value={a.accountName}>{a.accountName}</option>
+                          {bankAccounts.map((a) => (
+                            <option key={a.accountID} value={a.accountID}>{a.accountName}</option>
                           ))}
                         </Select>
                       </td>
+                      <td className="py-2 px-2">
+                        <Select aria-label="Purpose category" value={r.category} onChange={(e) => changeRow(r.key, { category: e.target.value })}>
+                          {(r.type === 'income' ? incomeCategories : expenseCategories).map((category) => <option key={category}>{category}</option>)}
+                        </Select>
+                        {r.type === 'income' && r.purpose && <small>{r.purpose}</small>}
+                      </td>
                       <td className="py-2 px-4">
                         {r.type === 'income' ? (
-                          <Input
-                            value={r.donorName}
-                            onChange={(e) => setDonorName(r.key, e.target.value)}
-                            placeholder="Donor name"
-                            className="!py-1 text-xs"
-                          />
+                          <>
+                            {r.donorName && <div className="text-xs mb-1">{r.donorName}</div>}
+                            {!isBankOnlyCategory(r.category) && <Select aria-label="Link donor profile" value={r.donorID} onChange={(e) => changeRow(r.key, { donorID: e.target.value })}>
+                              <option value="">Unlinked</option>
+                              {donors.map((donor) => <option key={donor.personID} value={donor.personID}>{donor.name}{donor.phone ? ' · ' + donor.phone : ''}</option>)}
+                            </Select>}
+                          </>
                         ) : (
                           <Input
                             value={r.remark}
@@ -373,14 +398,19 @@ export function BankStatementPage() {
                   ))}
                 </tbody>
               </table>
-              {rows.length === 0 && (
-                <EmptyState title="No rows recognised" subtitle="Try a different export format or check the column names." />
+              {filteredRows.length === 0 && (
+                <EmptyState title="No matching rows" subtitle="Choose another preview filter." />
               )}
             </div>
+            {filteredRows.length > 50 && <div className="flex items-center justify-between gap-3 border-t px-4 py-2">
+              <Button size="sm" variant="ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Button>
+              <span className="text-sm text-slate-600">Page {page + 1} of {Math.ceil(filteredRows.length / 50)}</span>
+              <Button size="sm" variant="ghost" disabled={(page + 1) * 50 >= filteredRows.length} onClick={() => setPage(page + 1)}>Next</Button>
+            </div>}
             <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-100">
               <p className="text-xs text-slate-500 flex items-center gap-1.5">
                 <CheckCircle2 size={14} className="text-emerald-500" />
-                Preview only — nothing is saved until you click Import. Donor-tagged credits are recorded as donations; debit rows as expenses (posted to the account chosen above).
+                Review categories and donor links before importing. Confirm the mobile number before linking a name-only row.
               </p>
               <Button variant="ghost" size="sm" onClick={() => { setRows(null); setFileName(''); setError('') }}>
                 Start over

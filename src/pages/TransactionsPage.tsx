@@ -34,6 +34,7 @@ export function TransactionsPage() {
     { header: 'Amount', accessor: (t: Transaction) => t.amount },
     { header: 'Account', accessor: (t: Transaction) => t.account },
     { header: 'Reference', accessor: (t: Transaction) => t.referenceID },
+    { header: 'Bank purpose', accessor: (t: Transaction) => t.bankCategory || '' },
     { header: 'Description', accessor: (t: Transaction) => t.description },
     { header: 'Created By', accessor: (t: Transaction) => t.createdBy },
   ]
@@ -48,6 +49,7 @@ export function TransactionsPage() {
     ), sortable: true, sortKey: 'amount' },
     { header: 'Account', accessor: (t) => t.account },
     { header: 'Reference', accessor: (t) => t.referenceID },
+    { header: 'Bank purpose', accessor: (t) => t.bankCategory || '—' },
     { header: 'Description', accessor: (t) => <span className="max-w-[220px] truncate block">{t.description}</span> },
     { header: 'Created By', accessor: (t) => t.createdBy },
   ]
