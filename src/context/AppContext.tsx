@@ -144,7 +144,7 @@ interface AppContextValue {
   updatePendingPayment: (p: PendingPayment) => Promise<void>
 
   addAccount: (a: Omit<Account, 'accountID'>) => Promise<Account>
-  updateAccount: (a: Account) => Promise<void>
+  updateAccount: (a: Pick<Account, 'accountID' | 'openingBalance'>) => Promise<void>
 
   addUser: (u: Omit<User, 'userID' | 'createdDate'>) => Promise<User>
   updateUser: (u: User) => Promise<void>
@@ -864,20 +864,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     audit('Create', 'Accounts', id)
     return account
   }
-  async function updateAccount(a: Account): Promise<void> {
-    setAccounts((prev) => prev.map((x) => (x.accountID === a.accountID ? { ...x, ...a } : x)))
-    if (CONFIG_USE_LIVE) {
-      try {
-        await dataService.persist('accounts', 'update', a)
-        notify('success', 'Account updated')
-        await refreshAll()
-      } catch (err) {
-        notify('error', errMsg(err))
-        await refreshAllSafe()
-        throw err
-      }
-    } else {
-      audit('Update', 'Accounts', a.accountID)
+  async function updateAccount(a: Pick<Account, 'accountID' | 'openingBalance'>): Promise<void> {
+    try {
+      await dataService.persist('accounts', 'update', a)
+      await refreshAll()
+      notify('success', 'Account updated')
+      if (!CONFIG_USE_LIVE) audit('Update', 'Accounts', a.accountID)
+    } catch (err) {
+      notify('error', errMsg(err))
+      await refreshAllSafe()
+      throw err
     }
   }
 

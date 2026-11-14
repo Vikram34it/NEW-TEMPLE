@@ -2230,7 +2230,7 @@ function ensureDefaultAccounts_(ss) {
   var sh = ensureSheet_(ss, 'accounts');
   if (sh.getLastRow() > 1) return;
   sh.appendRow(['ACC-0001', 'Temple Cash', 50000, 50000, 'cash', 'Petty cash on site']);
-  sh.appendRow(['ACC-0002', 'Main Bank Account', 250000, 250000, 'bank', 'Primary bank account']);
+  sh.appendRow(['ACC-0002', 'Main Bank Account', 57771.52, 57771.52, 'bank', 'Opening balance carried forward from the previous financial year']);
   sh.appendRow(['ACC-0003', 'Construction Account', 0, 0, 'construction', 'Tracks construction funds']);
   sh.appendRow(['ACC-0004', 'Donation Account', 0, 0, 'donation', 'Tracks donations received']);
 }

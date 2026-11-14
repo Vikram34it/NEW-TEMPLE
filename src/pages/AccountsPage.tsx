@@ -16,9 +16,11 @@ const accountIcon = (type: string) => {
 }
 
 export function AccountsPage() {
-  const { accounts, transactions, dashboard, can, addAccount } = useApp()
+  const { accounts, transactions, dashboard, can, addAccount, updateAccount } = useApp()
   const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState<Account | null>(null)
 
+  const openingAmount = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' })
   const accountTxs = (account: string) => transactions.filter((t) => t.account === account)
 
   return (
@@ -59,8 +61,9 @@ export function AccountsPage() {
               </div>
               <p className="text-2xl font-bold text-slate-800">{formatCurrency(balance)}</p>
               <p className="text-[11px] text-slate-400">
-                {isFundTracker ? 'Donations − expenses' : `Opening: ${formatCurrency(a.openingBalance)}`}
+                {isFundTracker ? 'Donations − expenses' : `Opening: ${openingAmount.format(a.openingBalance)}`}
               </p>
+              {can('*') && a.type === 'bank' && <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>Edit opening balance</Button>}
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
                 <div className="bg-emerald-50 rounded-lg p-2">
                   <p className="text-slate-500">Received</p>
@@ -76,6 +79,17 @@ export function AccountsPage() {
         })}
       </div>
 
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit opening balance">
+        {editing && <OpeningBalanceForm
+          key={editing.accountID}
+          account={editing}
+          onSave={async (openingBalance) => {
+            await updateAccount({ accountID: editing.accountID, openingBalance })
+            setEditing(null)
+          }}
+        />}
+      </Modal>
+
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Account">
         <AccountForm
           onDone={async (a) => { await addAccount(a); setShowAdd(false) }}
@@ -83,6 +97,33 @@ export function AccountsPage() {
         />
       </Modal>
     </div>
+  )
+}
+
+function OpeningBalanceForm({ account, onSave }: { account: Account; onSave: (amount: number) => Promise<void> }) {
+  const [amount, setAmount] = useState(String(account.openingBalance))
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  return (
+    <form className="space-y-4" onSubmit={async (event) => {
+      event.preventDefault()
+      setError('')
+      setSaving(true)
+      try {
+        await onSave(Number(amount))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save opening balance')
+      } finally {
+        setSaving(false)
+      }
+    }}>
+      <Field label={account.accountName + ' opening balance (INR)'} hint="Balance carried forward from the previous financial year" required>
+        <Input type="number" step="0.01" required value={amount} onChange={(event) => setAmount(event.target.value)} />
+      </Field>
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save opening balance'}</Button>
+    </form>
   )
 }
 
@@ -120,7 +161,7 @@ function AccountForm({ onDone, onClose }: { onDone: (a: Omit<Account, 'accountID
         </select>
       </Field>
       <Field label="Opening Balance (₹)">
-        <Input type="number" value={form.openingBalance} onChange={(e) => setForm({ ...form, openingBalance: Number(e.target.value) })} />
+        <Input type="number" step="0.01" value={form.openingBalance} onChange={(e) => setForm({ ...form, openingBalance: Number(e.target.value) })} />
       </Field>
       <Field label="Current Balance (calculated) - leave for auto-update">
         <Input type="number" value={form.currentBalance} onChange={(e) => setForm({ ...form, currentBalance: Number(e.target.value) })} className="bg-slate-50" />
