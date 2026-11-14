@@ -412,7 +412,7 @@ function route_(action, params, body, user) {
     case 'recordInstallmentReminder':
       return updateRecord_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans,
         { PlanID: body.planID, LastReminderAt: new Date().toISOString() }, 'PlanID');
-    case 'bulkLinkDonorReceipts': return bulkLinkDonorReceipts_(body.links);
+    case 'bulkLinkDonorReceipts': return bulkLinkDonorReceipts_(body.links, body.explicit === true);
     case 'linkTransactionsToPerson': return linkTransactionsToPerson_(body);
     case 'updateDonation': return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DonationID');
     case 'softDeleteDonation': return softDeleteRecord_(CONFIG.sheetNames.donations, 'DonationID', body.id);
@@ -1349,7 +1349,7 @@ function linkTransactionsToPerson_(body) {
   return { linked: indexes.size };
 }
 
-function bulkLinkDonorReceipts_(links) {
+function bulkLinkDonorReceipts_(links, explicit) {
   if (!Array.isArray(links) || !links.length) throw new Error('Choose receipts to link.');
   function nameKey(name) { return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
   function emailKey(email) { return String(email || '').trim().toLowerCase(); }
@@ -1366,6 +1366,11 @@ function bulkLinkDonorReceipts_(links) {
       throw new Error('A receipt is repeated or no longer eligible. Refresh and review the links again.');
     }
     seen.add(index);
+    if (explicit) {
+      var selected = people.find(function (person) { return String(person.PersonID) === String(link.donorID); });
+      if (!selected) throw new Error('The selected person is no longer available.');
+      return { row: index + 2, person: selected };
+    }
     var key = nameKey(donation.DonorName);
     var matches = people.filter(function (person) { return nameKey(person.Name) === key; });
     var person = matches[0];

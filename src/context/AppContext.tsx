@@ -131,7 +131,7 @@ interface AppContextValue {
   updatePerson: (p: Person) => Promise<void>
   deletePerson: (id: string) => Promise<void>
   linkTransactionsToPerson: typeof dataService.linkTransactionsToPerson
-  linkDonorReceipts: (links: Array<{ donationID: string; donorID: string }>) => Promise<void>
+  linkDonorReceipts: (links: Array<{ donationID: string; donorID: string }>, explicit?: boolean) => Promise<void>
   importDonorProfiles: () => Promise<{ created: number }>
   bulkAddPeople: (items: Array<Omit<Person, 'personID'>>) => Promise<Person[]>
 
@@ -676,10 +676,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function linkDonorReceipts(links: Array<{ donationID: string; donorID: string }>) {
+  async function linkDonorReceipts(links: Array<{ donationID: string; donorID: string }>, explicit = false) {
     try {
       if (CONFIG_USE_LIVE) {
-        await dataService.bulkLinkDonorReceipts(links)
+        await dataService.bulkLinkDonorReceipts(links, explicit)
         await refreshAll()
         return
       }

@@ -428,8 +428,8 @@ export const dataService = {
     rows.forEach((row) => { if (ids.has(row.transactionID)) row.personID = personID })
   },
 
-  async bulkLinkDonorReceipts(links: Array<{ donationID: string; donorID: string }>) {
-    return apiFetch('bulkLinkDonorReceipts', {}, { links })
+  async bulkLinkDonorReceipts(links: Array<{ donationID: string; donorID: string }>, explicit = false) {
+    return apiFetch('bulkLinkDonorReceipts', {}, { links, explicit })
   },
   async importDonorProfiles(): Promise<{ created: number }> {
     return apiFetch('importDonorProfiles', {}, {}) as Promise<{ created: number }>
