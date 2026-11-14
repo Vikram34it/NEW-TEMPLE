@@ -18,6 +18,7 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Finance',
     items: [
+      { path: '/collections', label: 'Collections', roles: ['admin', 'collector'] },
       { path: '/donations', label: 'Donations', roles: ['admin', 'accountant'] },
       { path: '/installments', label: 'Donor Installments', roles: ['admin', 'accountant'] },
       { path: '/expenses', label: 'Expenses', roles: ['admin', 'accountant'] },

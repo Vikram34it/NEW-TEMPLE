@@ -25,7 +25,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        {user?.role !== 'donor' && (
+        {user?.role !== 'donor' && user?.role !== 'collector' && (
           <Link
             to="/messages"
             className="relative p-2 rounded-lg hover:bg-slate-100 text-slate-600"

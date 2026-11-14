@@ -20,6 +20,7 @@ var CONFIG = {
     communication: 'Communication',
     campaigns: 'Campaigns',
     installmentPlans: 'InstallmentPlans',
+    collections: 'Collections',
   },
 };
 
@@ -171,7 +172,7 @@ function randomToken_() {
 var HEADERS = {
   users: ['UserID', 'Name', 'Email', 'Role', 'Status', 'CreatedDate', 'Password', 'Phone', 'DonorPersonID'],
   people: ['PersonID', 'Name', 'Phone', 'Email', 'Address', 'City', 'PersonType', 'JoinDate', 'Status', 'Notes', 'Birthday', 'Anniversary', 'PreferredChannel', 'PANNumber', 'AadhaarNumber'],
-  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey', 'InstallmentPlanID'],
+  donations: ['DonationID', 'Date', 'DonorID', 'DonorName', 'Phone', 'Email', 'Address', 'Amount', 'Category', 'Purpose', 'PaymentMethod', 'TransactionReference', 'ReceivedBy', 'ReceiptNumber', 'Notes', 'PANNumber', 'AadhaarNumber', 'Need80G', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey', 'InstallmentPlanID', 'CollectionID'],
   expenses: ['ExpenseID', 'Date', 'Category', 'Description', 'Amount', 'PaymentMethod', 'VendorID', 'VendorName', 'BillNumber', 'TransactionReference', 'ProjectID', 'ProjectName', 'ApprovedBy', 'PaidBy', 'Notes', 'CreatedAt', 'UpdatedAt', 'Deleted', 'AccountID', 'BankImportKey'],
   vendors: ['VendorID', 'CompanyName', 'ContactPerson', 'Phone', 'Email', 'Address', 'ServiceType', 'GSTNumber', 'BankDetails', 'Notes'],
   projects: ['ProjectID', 'ProjectName', 'Description', 'StartDate', 'EstimatedBudget', 'ActualExpense', 'Status', 'Contractor'],
@@ -186,6 +187,7 @@ var HEADERS = {
   requests: ['RequestID', 'Date', 'PersonID', 'PersonName', 'Type', 'Description', 'AssignedTo', 'Status', 'Notes'],
   communication: ['CommunicationID', 'PersonID', 'DonorName', 'Date', 'Channel', 'Type', 'Subject', 'Message', 'SentBy', 'Status'],
   installmentPlans: ['PlanID', 'DonorID', 'Purpose', 'Schedule', 'LastReminderAt'],
+  collections: ['CollectionID', 'CollectorID', 'CollectorName', 'SubmittedAt', 'Status', 'Details', 'ReviewNote', 'ReviewedBy', 'ReviewedAt', 'DonationID', 'Handover'],
   campaigns: ['CampaignID', 'ScheduledAt', 'Channel', 'Type', 'Subject', 'Message', 'Festival', 'Recipients', 'SentBy', 'Status', 'CreatedAt'],
 };
 
@@ -254,6 +256,7 @@ var READ_ROLES_ = Object.create(null);
   ['admin accountant manager viewer', 'getUsers users getPeople people getExpenses expenses getVendors vendors getProjects projects getDashboardData getReports getAnnouncements announcements getMessages messages getEvents events getEventVolunteers eventVolunteers getRequests requests'],
   ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
   ['admin accountant', 'getTransactions transactions getInstallmentPlans'],
+  ['admin collector', 'getCollections findCollectionDonors getCollectionPlans'],
   ['admin', 'getAuditLog auditLog'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
@@ -265,6 +268,8 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
   ['admin manager', 'createPerson importDonorProfiles updatePerson deletePerson createVendor updateVendor deleteVendor'],
   ['admin accountant', 'createDonation bulkCreateDonations bulkLinkDonorReceipts linkTransactionsToPerson updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
+  ['admin collector', 'submitCollection'],
+  ['admin', 'reviewCollection recordCollectionHandover receiveCollectionMaterials'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
@@ -451,6 +456,13 @@ function route_(action, params, body, user) {
     // --- Writes (generic CRUD, one endpoint per table) ---
     case 'createDonation': return createRecord_(CONFIG.sheetNames.donations, HEADERS.donations, body.record, 'DON-', 'donation', ['DonorName', 'Amount']);
     case 'bulkCreateDonations': return bulkCreateRecords_(CONFIG.sheetNames.donations, HEADERS.donations, body.records, 'DON-', 'donation', ['DonorName', 'Amount']);
+    case 'getCollections': return getCollections_(user, body.ownOnly === true);
+    case 'findCollectionDonors': return findCollectionDonors_(body);
+    case 'getCollectionPlans': return getCollectionPlans_(body);
+    case 'submitCollection': return submitCollection_(body, user);
+    case 'reviewCollection': return reviewCollection_(body, user);
+    case 'recordCollectionHandover': return recordCollectionHandover_(body, user);
+    case 'receiveCollectionMaterials': return receiveCollectionMaterials_(body, user);
     case 'getInstallmentPlans': return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans);
     case 'createInstallmentPlan': return createInstallmentPlan_(body);
     case 'linkInstallmentPayment': return linkInstallmentPayment_(body);
@@ -1169,7 +1181,7 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
   var row = [];
   for (var i = 0; i < headers.length; i++) {
     var field = headers[i];
-    var val = field === 'InstallmentPlanID' ? '' : isLedgerSheet_(sheetName) && (field === 'BankImportKey' || field === 'AccountID')
+    var val = field === 'InstallmentPlanID' || field === 'CollectionID' ? '' : isLedgerSheet_(sheetName) && (field === 'BankImportKey' || field === 'AccountID')
       ? '' : sheetValue_(record[field]);
     if (headers[i] === idCol) val = id;
     row.push(val === undefined ? '' : val);
@@ -1214,11 +1226,21 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   var hasBankRows = records.some(function (record) { return record && record.BankImportKey; });
   var importAccounts = hasBankRows ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
   var importPeople = hasBankRows && module === 'donation' ? readAll_(CONFIG.sheetNames.people, HEADERS.people) : [];
+  var collectionCredits = [];
+  var collectionDeposits = [];
   if (hasBankRows) {
     ['donations', 'expenses', 'transactions'].forEach(function (key) {
       var name = CONFIG.sheetNames[key];
       var existing = name === sheetName ? data : tableData_(name, HEADERS[key]);
-      existing.forEach(function (row) { if (row.BankImportKey) importKeys[row.BankImportKey] = true; });
+      existing.forEach(function (row, index) {
+        if (row.BankImportKey) importKeys[row.BankImportKey] = true;
+        if (key === 'donations' && row.CollectionID && row.PaymentMethod !== 'Cash' && notDeleted_(row)) {
+          collectionCredits.push({ row: row, index: index + 2 });
+        }
+        if (key === 'transactions' && String(row.ReferenceID).indexOf('HANDOVER-COL-') === 0 && row.IncomeOrExpense === 'income') {
+          collectionDeposits.push({ row: row, index: index + 2 });
+        }
+      });
     });
   }
 
@@ -1248,6 +1270,32 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
       if (!importAccounts.some(function (account) { return String(account.AccountID) === String(record.AccountID) && String(account.Type).toLowerCase() === 'bank'; })) {
         throw new Error('Bank import account no longer exists');
       }
+      var reference = String(record.TransactionReference || record.ReferenceID || '').trim().toLowerCase();
+      var isCredit = module === 'donation' || (module === 'transaction' && record.IncomeOrExpense === 'income');
+      if (isCredit && reference) {
+        var matches = [
+          { sheetKey: 'donations', rows: collectionCredits, ref: function (row) { return row.TransactionReference; } },
+          { sheetKey: 'transactions', rows: collectionDeposits, ref: function (row) { return String(row.Description).replace(/^Cash handover: /, ''); } }
+        ].flatMap(function (source) {
+          return source.rows.filter(function (entry) {
+            return String(entry.row.AccountID) === String(record.AccountID) &&
+              String(source.ref(entry.row)).trim().toLowerCase() === reference;
+          }).map(function (entry) { return { sheetKey: source.sheetKey, entry: entry }; });
+        });
+        if (matches.length) {
+          var match = matches[0];
+          if (matches.length !== 1 || match.entry.row.BankImportKey ||
+              Math.round(Number(match.entry.row.Amount) * 100) !== Math.round(Number(record.Amount) * 100)) {
+            throw new Error('Bank reference ' + reference + ' conflicts with a posted collection or cash deposit.');
+          }
+          var matchSheet = sheet_(CONFIG.sheetNames[match.sheetKey]);
+          var keyColumn = HEADERS[match.sheetKey].indexOf('BankImportKey') + 1;
+          matchSheet.getRange(match.entry.index, keyColumn).setValue(record.BankImportKey);
+          match.entry.row.BankImportKey = record.BankImportKey;
+          importKeys[record.BankImportKey] = true;
+          continue;
+        }
+      }
       importKeys[record.BankImportKey] = true;
     }
     accepted.push(record);
@@ -1274,7 +1322,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     // Build the row array matching header order
     var row = [];
     for (var h = 0; h < headers.length; h++) {
-      var val = headers[h] === 'InstallmentPlanID' ? '' : sheetValue_(record[headers[h]]);
+      var val = headers[h] === 'InstallmentPlanID' || headers[h] === 'CollectionID' ? '' : sheetValue_(record[headers[h]]);
       if (headers[h] === idCol) val = id;
       row.push(val === undefined ? '' : val);
     }
@@ -1314,6 +1362,375 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
 
   // Return the created records with their IDs
   return { created: accepted.length, skipped: records.length - accepted.length, prefix: prefix };
+}
+
+
+/* Field collections enter the finance ledger only through admin review. */
+function collectionRows_() {
+  return readAll_(CONFIG.sheetNames.collections, HEADERS.collections);
+}
+
+function collectionPerson_(id) {
+  return readAll_(CONFIG.sheetNames.people, HEADERS.people).find(function (person) {
+    return String(person.PersonID) === id && String(person.Status).toLowerCase() === 'active' &&
+      /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(person.PersonType));
+  });
+}
+
+function findCollectionDonors_(body) {
+  var query = collectionText_(body.query, 100).toLowerCase();
+  if (query.length < 3) return [];
+  var phone = /^[+()0-9 .-]+$/.test(query) ? normalizePhone_(query) : '';
+  return readAll_(CONFIG.sheetNames.people, HEADERS.people).filter(function (person) {
+    if (String(person.Status).toLowerCase() !== 'active' || !/(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(person.PersonType))) return false;
+    return phone ? normalizePhone_(person.Phone) === phone : String(person.Name).toLowerCase().includes(query);
+  }).slice(0, 20).map(function (person) {
+    return { id: person.PersonID, name: person.Name, phoneEnd: normalizePhone_(person.Phone).slice(-4) };
+  });
+}
+
+function getCollectionPlans_(body) {
+  if (!collectionPerson_(body.donorID)) return [];
+  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).filter(function (plan) {
+    return String(plan.DonorID) === body.donorID;
+  }).map(function (plan) {
+    var schedule = JSON.parse(plan.Schedule);
+    var paid = donations.reduce(function (sum, donation) {
+      return donation.InstallmentPlanID === plan.PlanID ? sum + Math.round(Number(donation.Amount) * 100) : sum;
+    }, 0);
+    var committed = schedule.reduce(function (sum, item) { return sum + item.paise; }, 0);
+    var scheduled = 0;
+    var next = schedule.find(function (item) { scheduled += item.paise; return scheduled > paid; });
+    return { id: plan.PlanID, purpose: plan.Purpose, outstanding: Math.max(committed - paid, 0) / 100,
+      committed: committed / 100, nextDue: next ? next.due : '' };
+  });
+}
+
+function getCollections_(user, ownOnly) {
+  return collectionRows_().filter(function (row) {
+    return (user.Role === 'admin' && !ownOnly) || String(row.CollectorID) === String(user.UserID);
+  }).reverse().map(function (row) {
+    var details = JSON.parse(row.Details);
+    if (details.aadhaar) details.aadhaar = '•••• ' + details.aadhaar.slice(-4);
+    if (details.pan) details.pan = '••••••' + details.pan.slice(-4);
+    return { id: row.CollectionID, collector: row.CollectorName, submittedAt: row.SubmittedAt,
+      status: row.Status, details: details, note: row.ReviewNote, donationID: row.DonationID,
+      handover: row.Handover ? JSON.parse(row.Handover) : null };
+  });
+}
+
+function collectionText_(value, limit) {
+  if (typeof value !== 'string') return '';
+  if (value.length > limit) throw new Error('One of the collection fields is too long.');
+  return value.trim();
+}
+
+function collectionDate_(value) {
+  var date = new Date(value + 'T00:00:00Z');
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function collectionDetails_(body) {
+  var input = body.details || {};
+  var fields = { donorID: 40, name: 150, phone: 30, email: 254, address: 600, office: 600, mailing: 20, pan: 10, aadhaar: 12,
+    gotram: 100, prayer1: 150, prayerDate1: 10, prayer2: 150, prayerDate2: 10, referrals: 1000, signature: 150,
+    signedDate: 10, seva: 20, category: 60, kind: 20, planID: 40, date: 10, method: 20, reference: 120,
+    item: 150, unit: 40, delivery: 20, site: 150 };
+  var data = {};
+  Object.keys(fields).forEach(function (key) { data[key] = collectionText_(input[key], fields[key]); });
+  if (!/^(Yudhisthra|Bhima|Arjuna|Nakula|Sahadeva)$/.test(data.seva) ||
+      !/^(General Donation|Land Purchase|Temple Construction|Seva|Other)$/.test(data.category) || !collectionDate_(data.date)) {
+    throw new Error('Choose a seva, purpose and valid collection date.');
+  }
+  if (data.donorID) {
+    var person = collectionPerson_(data.donorID);
+    if (!person) throw new Error('Choose an active donor.');
+    data.name = String(person.Name);
+    ['phone','email','address','office','mailing','pan','aadhaar','gotram','prayer1','prayerDate1','prayer2','prayerDate2','referrals','signature','signedDate'].forEach(function (key) {
+      data[key] = '';
+    });
+  } else {
+    data.phone = normalizePhone_(data.phone);
+    data.pan = data.pan.toUpperCase();
+    if (!data.name || !/^\d{10}$/.test(data.phone) || !data.address || !/^\d{12}$/.test(data.aadhaar) ||
+        !/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan) || !/^(Residence|Office)$/.test(data.mailing) ||
+        (data.mailing === 'Office' && !data.office) || !data.signature || !collectionDate_(data.signedDate)) {
+      throw new Error('Complete the donor enrollment details, including the signature name and date.');
+    }
+  }
+  if ((data.prayerDate1 && !collectionDate_(data.prayerDate1)) || (data.prayerDate2 && !collectionDate_(data.prayerDate2))) {
+    throw new Error('Enter valid dates for the prayer occasions.');
+  }
+  if (data.kind === 'materials') {
+    data.method = '';
+    data.reference = '';
+    data.planID = '';
+    data.quantity = Number(input.quantity);
+    if (!data.item || !data.unit || !Number.isFinite(data.quantity) || data.quantity <= 0 ||
+        !/^(Promised|Delivered)$/.test(data.delivery) || (data.delivery === 'Delivered' && !data.site)) {
+      throw new Error('Enter the item, quantity, unit and delivery details.');
+    }
+    return data;
+  }
+  if (data.method === 'Cash') data.reference = '';
+  var amount = String(input.amount || '');
+  data.amount = Number(amount);
+  if (!/^(one-time|installment)$/.test(data.kind) || !/^\d+(?:\.\d{1,2})?$/.test(amount) ||
+      data.amount <= 0 || data.amount > 1000000000 || !/^(Cash|UPI|Bank Transfer|Cheque)$/.test(data.method) ||
+      (data.method !== 'Cash' && !data.reference)) throw new Error('Enter a valid amount, payment method and reference.');
+  if (data.kind === 'installment') {
+    var plan = getCollectionPlans_({ donorID: data.donorID }).find(function (row) { return row.id === data.planID; });
+    if (!plan || Math.round(data.amount * 100) > Math.round(plan.outstanding * 100)) {
+      throw new Error('Choose an existing commitment and enter an amount within its outstanding balance.');
+    }
+  } else data.planID = '';
+  return data;
+}
+
+function updateCollection_(row, changes) {
+  var name = CONFIG.sheetNames.collections;
+  Object.keys(changes).forEach(function (key) { row[key] = changes[key]; });
+  var index = collectionRows_().findIndex(function (item) { return item.CollectionID === row.CollectionID; });
+  if (index < 0) throw new Error('Collection not found.');
+  sheet_(name).getRange(index + 2, 1, 1, HEADERS.collections.length).setValues([
+    HEADERS.collections.map(function (key) { return sheetValue_(row[key]); })
+  ]);
+}
+
+function submitCollection_(body, user) {
+  var id = collectionText_(body.id, 45);
+  if (!/^COL-[a-f0-9-]{36}$/i.test(id)) throw new Error('Invalid collection reference.');
+  var existing = collectionRows_().find(function (row) { return row.CollectionID === id; });
+  if (existing && String(existing.CollectorID) !== String(user.UserID)) throw new Error('Collection not found.');
+  if (existing && existing.Status !== 'Needs correction') return { id: id };
+  var details = collectionDetails_(body);
+  if (existing) {
+    updateCollection_(existing, { Details: JSON.stringify(details), Status: 'Pending review', ReviewNote: '',
+      ReviewedBy: '', ReviewedAt: '', SubmittedAt: new Date().toISOString() });
+  } else {
+    sheet_(CONFIG.sheetNames.collections).appendRow([
+      id, user.UserID, sheetValue_(user.Name), new Date().toISOString(), 'Pending review', JSON.stringify(details)
+    ]);
+  }
+  audit_('collections', 'Submit', id, '', '');
+  return { id: id };
+}
+
+function collectionAccount_(id, type) {
+  var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+  var account = accounts.find(function (a) { return String(a.AccountID) === id && String(a.Type).toLowerCase() === type; });
+  if (!account || accounts.filter(function (a) { return a.AccountName === account.AccountName; }).length !== 1) {
+    throw new Error('Choose an existing ' + type + ' account with a unique name.');
+  }
+  return account;
+}
+
+function cashWithCollectors_() {
+  var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+  var matching = accounts.filter(function (a) { return a.AccountName === 'Cash with Collectors'; });
+  if (!matching.length) {
+    createRecord_(CONFIG.sheetNames.accounts, HEADERS.accounts, {
+      AccountName: 'Cash with Collectors', OpeningBalance: 0, CurrentBalance: 0, Type: 'cash'
+    }, 'ACC-', 'account', ['AccountName']);
+    return cashWithCollectors_();
+  }
+  return collectionAccount_(String(matching[0].AccountID), 'cash');
+}
+
+function reviewCollection_(body, user) {
+  var row = collectionRows_().find(function (entry) { return entry.CollectionID === body.id; });
+  if (!row) throw new Error('Collection not found.');
+  if (row.Status === 'Approved' && body.decision === 'Approved') return { id: row.CollectionID };
+  if (row.Status !== 'Pending review') throw new Error('This collection is no longer pending.');
+  var decision = body.decision;
+  var note = collectionText_(body.note, 1000);
+  var data = JSON.parse(row.Details);
+  var donations = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var receipt = donations.find(function (d) { return d.CollectionID === row.CollectionID; });
+  if (receipt && !notDeleted_(receipt)) throw new Error('The collection receipt was cancelled. Review it in Donations.');
+  if (receipt && decision !== 'Approved') throw new Error('Approval has started. Retry approval to finish posting.');
+  if (decision === 'Approved') {
+    if (data.kind !== 'materials' && !receipt) {
+      var account = data.method === 'Cash' ? cashWithCollectors_() : collectionAccount_(body.accountID, 'bank');
+      var matched = [];
+      if (data.method !== 'Cash') {
+        var ref = data.reference.toLowerCase();
+        matched = donations.filter(function (d) {
+          return notDeleted_(d) && String(d.TransactionReference).trim().toLowerCase() === ref;
+        });
+        var bankMovement = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions).some(function (t) {
+          return t.BankImportKey && t.IncomeOrExpense === 'income' && String(t.ReferenceID).trim().toLowerCase() === ref;
+        });
+        if (bankMovement || matched.length > 1) throw new Error('This reference needs bank reconciliation before approval.');
+        if (matched.length) {
+          var existing = matched[0];
+          if (existing.CollectionID || !existing.BankImportKey || String(existing.AccountID) !== String(account.AccountID) ||
+              Math.round(Number(existing.Amount) * 100) !== Math.round(data.amount * 100) ||
+              (existing.DonorID && String(existing.DonorID) !== data.donorID) ||
+              (existing.InstallmentPlanID && existing.InstallmentPlanID !== data.planID)) {
+            throw new Error('An existing receipt uses this reference. Review it in Donations before approving.');
+          }
+        } else if (body.confirmBankCredit !== true) {
+          throw new Error('Verify that the payment has credited the selected bank account.');
+        }
+      }
+      if (data.planID && !(matched.length && matched[0].InstallmentPlanID === data.planID)) {
+        var plan = getCollectionPlans_({ donorID: data.donorID }).find(function (item) { return item.id === data.planID; });
+        if (!plan || Math.round(data.amount * 100) > Math.round(plan.outstanding * 100)) throw new Error('The commitment balance changed. Review the payment.');
+      }
+      var donor = data.donorID ? collectionPerson_(data.donorID) : enrollCollectionDonor_(data, row.CollectionID);
+      if (!donor) throw new Error('The donor profile is no longer active.');
+      receipt = postCollectionDonation_(row, data, donor, account, matched[0], donations);
+    } else if (data.kind === 'materials') {
+      var materialDonor = data.donorID ? collectionPerson_(data.donorID) : enrollCollectionDonor_(data, row.CollectionID);
+      if (!materialDonor) throw new Error('The donor profile is no longer active.');
+      data.donorID = String(materialDonor.PersonID);
+    }
+    if (receipt) resyncLedger_();
+  } else if (!/^(Needs correction|Rejected)$/.test(decision) || !note) {
+    throw new Error('Enter a review note when returning or rejecting a submission.');
+  }
+  if (receipt && !data.donorID) data.donorID = String(receipt.DonorID);
+  updateCollection_(row, { Status: decision, ReviewNote: note, ReviewedBy: user.Email, ReviewedAt: new Date().toISOString(),
+    DonationID: receipt ? receipt.DonationID : '', Details: JSON.stringify(data) });
+  audit_('collections', decision, row.CollectionID, '', '');
+  return { id: row.CollectionID };
+}
+
+function enrollCollectionDonor_(data, id) {
+  var people = readAll_(CONFIG.sheetNames.people, HEADERS.people);
+  var marker = 'Enrollment ' + id;
+  var alreadyEnrolled = people.find(function (p) { return p.Notes === marker; });
+  if (alreadyEnrolled) return alreadyEnrolled;
+  if (people.some(function (p) { return normalizePhone_(p.Phone) === data.phone; })) {
+    throw new Error('This mobile is already in People. Return the submission and ask the collector to select the existing donor.');
+  }
+  return createRecord_(CONFIG.sheetNames.people, HEADERS.people, {
+    Name: data.name, Phone: data.phone, Email: data.email, Address: data.address,
+    PersonType: 'Donor', Status: 'active', JoinDate: data.signedDate, Notes: marker
+  }, 'PER-', 'person', ['Name']);
+}
+
+function postCollectionDonation_(row, data, donor, account, matched, donations) {
+  var name = CONFIG.sheetNames.donations;
+  var headers = HEADERS.donations;
+  var sheet = sheet_(name);
+  ensureColumnCapacity_(sheet, headers.length);
+  var lastHeader = sheet.getRange(1, headers.length);
+  if (!lastHeader.getValue()) lastHeader.setValue('CollectionID');
+  if (lastHeader.getValue() !== 'CollectionID') throw new Error('The Donations sheet needs an available CollectionID column.');
+  var record = matched || {};
+  if (!matched) {
+    record.DonationID = nextIdFor_(name, 'DonationID', 'DON-');
+    record.ReceiptNumber = String(getSettings_().receiptPrefix || 'REC') + '-' + record.DonationID.split('-')[1] + '-' + pad4_(parseIdNumber(record.DonationID));
+    record.CreatedAt = new Date().toISOString();
+    record.Date = data.date;
+    record.TransactionReference = data.reference;
+  }
+  Object.assign(record, {
+    DonorID: donor.PersonID, DonorName: donor.Name, Phone: donor.Phone, Email: donor.Email, Address: donor.Address,
+    Amount: data.amount, Category: data.category, Purpose: data.seva, PaymentMethod: data.method,
+    ReceivedBy: row.CollectorName, AccountID: account.AccountID, InstallmentPlanID: data.planID || '', CollectionID: row.CollectionID
+  });
+  var at = matched ? donations.indexOf(matched) + 2 : sheet.getLastRow() + 1;
+  ensureRowCapacity_(sheet, at);
+  sheet.getRange(at, 1, 1, headers.length).setValues([
+    headers.map(function (key) { return record[key] === undefined ? '' : sheetValue_(record[key]); })
+  ]);
+  return record;
+}
+
+function recordCollectionHandover_(body, user) {
+  var row = collectionRows_().find(function (entry) { return entry.CollectionID === body.id; });
+  if (!row || row.Status !== 'Approved' || JSON.parse(row.Details).method !== 'Cash') {
+    throw new Error('Choose an approved cash collection awaiting handover.');
+  }
+  if (row.Handover) return { id: row.CollectionID };
+  var receipt = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).find(function (d) { return d.CollectionID === row.CollectionID; });
+  if (!receipt) throw new Error('The approved receipt is missing.');
+  var date = collectionText_(body.date, 10);
+  var ref = collectionText_(body.reference, 120);
+  if (!collectionDate_(date) || date < JSON.parse(row.Details).date || !ref) throw new Error('Enter a handover date on or after the collection date and a reference.');
+  var source = collectionAccount_(String(receipt.AccountID), 'cash');
+  var target = collectionAccount_(body.accountID, body.accountType === 'bank' ? 'bank' : 'cash');
+  if (source.AccountID === target.AccountID) throw new Error('Choose a different destination account.');
+  var transferID = 'HANDOVER-' + row.CollectionID;
+  var ledger = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
+  var existing = ledger.filter(function (t) { return t.ReferenceID === transferID || String(t.ReferenceID).indexOf(transferID + ':') === 0; });
+  if (!existing.length) {
+    var deposit = null;
+    if (String(target.Type).toLowerCase() === 'bank') {
+      var comparable = ref.toLowerCase();
+      var donationDeposit = readAll_(CONFIG.sheetNames.donations, HEADERS.donations).some(function (d) {
+        return String(d.AccountID) === String(target.AccountID) && String(d.TransactionReference).trim().toLowerCase() === comparable;
+      });
+      var transfers = ledger.filter(function (t) {
+        return String(t.AccountID) === String(target.AccountID) && t.BankImportKey && t.IncomeOrExpense === 'income' &&
+          String(t.ReferenceID).trim().toLowerCase() === comparable;
+      });
+      var postedHandover = ledger.some(function (t) {
+        if (transfers.length && t.IncomeOrExpense === 'expense' &&
+            String(t.ReferenceID).indexOf('HANDOVER-COL-') === 0 &&
+            String(t.ReferenceID).split(':')[1] === transfers[0].BankImportKey) return true;
+        return String(t.AccountID) === String(target.AccountID) && t.IncomeOrExpense === 'income' &&
+          String(t.ReferenceID).indexOf('HANDOVER-COL-') === 0 && String(t.Description).toLowerCase() === 'cash handover: ' + comparable;
+      });
+      if (donationDeposit || postedHandover || transfers.length > 1 ||
+          (transfers.length && (transfers[0].BankCategory !== 'Internal Transfer' ||
+           Math.round(Number(transfers[0].Amount) * 100) !== Math.round(Number(receipt.Amount) * 100)))) {
+        throw new Error('This deposit reference needs bank reconciliation. Check the credit in Bank Statement or Transactions.');
+      }
+      deposit = transfers[0];
+    }
+    var description = 'Cash handover: ' + ref;
+    var records = [{ account: source, direction: 'expense' }, { account: target, direction: 'income' }].map(function (part) {
+      return { Date: date, Type: part.direction, IncomeOrExpense: part.direction, Amount: receipt.Amount, Account: part.account.AccountName,
+        AccountID: part.account.AccountID, ReferenceID: transferID, Description: description, CreatedBy: user.Email, BankCategory: 'Internal Transfer' };
+    });
+    if (deposit) {
+      // Preserve the imported bank credit. The handover adds only the cash-side movement.
+      records[0].Description = description;
+      records[0].ReferenceID = transferID + ':' + deposit.BankImportKey;
+      bulkCreateRecords_(CONFIG.sheetNames.transactions, HEADERS.transactions, [records[0]], 'TXN-', 'transaction', []);
+    } else {
+      bulkCreateRecords_(CONFIG.sheetNames.transactions, HEADERS.transactions, records, 'TXN-', 'transaction', []);
+    }
+  } else {
+    var incoming = existing.find(function (t) { return t.IncomeOrExpense === 'income'; });
+    var outgoing = existing.find(function (t) { return t.IncomeOrExpense === 'expense'; });
+    var matchedKey = outgoing && String(outgoing.ReferenceID).split(':')[1];
+    if (!incoming && matchedKey) incoming = ledger.find(function (t) {
+      return t.BankImportKey === matchedKey && String(t.ReferenceID).trim().toLowerCase() === ref.toLowerCase();
+    });
+    if (!incoming || !outgoing || existing.length !== (matchedKey ? 1 : 2) ||
+        String(incoming.AccountID) !== String(target.AccountID) ||
+        outgoing.Description !== 'Cash handover: ' + ref || (outgoing.Date instanceof Date ? Utilities.formatDate(outgoing.Date, 'Asia/Kolkata', 'yyyy-MM-dd') : String(outgoing.Date).slice(0, 10)) !== date) {
+      throw new Error('A handover already posted. Retry with the original destination, date and reference.');
+    }
+  }
+  resyncLedger_();
+  updateCollection_(row, { Handover: JSON.stringify({ account: target.AccountName, date: date, reference: ref }) });
+  audit_('collections', 'Handover', row.CollectionID, '', '');
+  return { id: row.CollectionID };
+}
+
+function receiveCollectionMaterials_(body, user) {
+  var row = collectionRows_().find(function (entry) { return entry.CollectionID === body.id; });
+  if (!row || row.Status !== 'Approved') throw new Error('Choose approved materials.');
+  var data = JSON.parse(row.Details);
+  var site = collectionText_(body.site, 150);
+  var date = collectionText_(body.date, 10);
+  if (data.kind === 'materials' && data.delivery === 'Delivered') return { id: row.CollectionID };
+  if (data.kind !== 'materials' || data.delivery !== 'Promised' || !site || !collectionDate_(date) || date < data.date) {
+    throw new Error('Enter a delivery date and site for promised materials.');
+  }
+  data.delivery = 'Delivered';
+  data.site = site;
+  data.deliveredDate = date;
+  updateCollection_(row, { Details: JSON.stringify(data) });
+  audit_('collections', 'Materials received', row.CollectionID, '', user.Email);
+  return { id: row.CollectionID };
 }
 
 function createInstallmentPlan_(body) {
@@ -1479,6 +1896,10 @@ function updateRecord_(sheetName, headers, record, idCol, allowInstallmentLink) 
 
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
+      if (sheetName === CONFIG.sheetNames.donations && data[r].CollectionID &&
+          ['Amount', 'PaymentMethod', 'TransactionReference'].some(function (key) {
+            return record[key] !== undefined && String(record[key]) !== String(data[r][key]);
+          })) throw new Error('Posted collection amounts, payment methods and references require reconciliation.');
       if (sheetName === CONFIG.sheetNames.donations && data[r].InstallmentPlanID &&
           record.DonorID !== undefined && String(record.DonorID) !== String(data[r].DonorID)) {
         throw new Error('Unlink this receipt from its installment commitment before changing donors.');
@@ -1486,7 +1907,7 @@ function updateRecord_(sheetName, headers, record, idCol, allowInstallmentLink) 
       var values = [];
       for (var c = 0; c < headers.length; c++) {
         var field = headers[c];
-        var val = field === 'InstallmentPlanID' && !allowInstallmentLink || field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
+        var val = field === 'CollectionID' || field === 'InstallmentPlanID' && !allowInstallmentLink || field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
           ? undefined : sheetValue_(record[field]);
         values.push(val === undefined ? sheetValue_(data[r][headers[c]]) : val);
       }
@@ -1506,6 +1927,7 @@ function softDeleteRecord_(sheetName, idCol, id) {
   var found = 0;
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
+      if (sheetName === CONFIG.sheetNames.donations && data[r].CollectionID) throw new Error('Posted collections require reconciliation before cancellation.');
       found++;
       if (deletedCol > 0) {
         sheet.getRange(r + 2, deletedCol).setValue('TRUE');
@@ -1627,7 +2049,7 @@ function isSeedPassword_(password) {
 
 function prepareUserWrite_(record, creating) {
   validateRecord_(record, creating ? ['Name', 'Email', 'Password'] : []);
-  if (record.Role !== undefined && ['admin', 'accountant', 'manager', 'viewer', 'donor'].indexOf(record.Role) < 0) {
+  if (record.Role !== undefined && ['admin', 'accountant', 'manager', 'viewer', 'donor', 'collector'].indexOf(record.Role) < 0) {
     throw new Error('Invalid user role');
   }
   if (record.Password === '' && !creating) delete record.Password;
@@ -2182,7 +2604,7 @@ function reconcileLedger_() {
   var rows = [];
   manual.forEach(function (m) {
     if (!m || !m.TransactionID) return;
-    if (m.BankImportKey && m.AccountID) m.Account = ledgerAccount_(m, accounts);
+    if ((m.BankImportKey || String(m.ReferenceID).indexOf('HANDOVER-COL-') === 0) && m.AccountID) m.Account = ledgerAccount_(m, accounts);
     rows.push(txHeader.map(function (h) { return m[h] === undefined ? '' : sheetValue_(m[h]); }));
     var tm = String(m.TransactionID || '').match(/TXN-(\d+)/);
     if (tm) { var n = parseInt(tm[1], 10); if (n > nextTxnNum) nextTxnNum = n; }
@@ -2260,10 +2682,13 @@ function clearBankTransactions_() {
   var txHeader = HEADERS.transactions;
   var txData = tableData_(CONFIG.sheetNames.transactions, txHeader);
 
+  var usedDeposits = new Set(txData.filter(function (row) {
+    return row.IncomeOrExpense === 'expense' && String(row.ReferenceID).indexOf('HANDOVER-COL-') === 0;
+  }).map(function (row) { return String(row.ReferenceID).split(':')[1]; }));
   var removed = 0;
   for (var i = txData.length - 1; i >= 0; i--) {
     var ref = String(txData[i].ReferenceID || '').toUpperCase();
-    if (/^BANK-/.test(ref)) {
+    if (/^BANK-/.test(ref) && !usedDeposits.has(txData[i].BankImportKey)) {
       // Row i+2 (header is row 1).
       txSheet.deleteRow(i + 2);
       removed++;

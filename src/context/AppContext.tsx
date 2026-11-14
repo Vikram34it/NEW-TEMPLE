@@ -85,6 +85,7 @@ function errMsg(e: unknown): string {
 }
 
 interface AppContextValue {
+  refreshCollectionsLedger: () => Promise<void>
   user: User | null
   login: (identifier: string, password: string) => Promise<string | null>
   logout: () => void
@@ -243,6 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   async function refreshAll(): Promise<void> {
     if (CONFIG_USE_LIVE && !user) return
+    if (user?.role === 'collector') return
     const isDonor = user?.role === 'donor'
     const me = isDonor ? user.email : undefined
     const mob = isDonor ? user.phone : undefined
@@ -357,7 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Load (or clear) the mailbox whenever the logged-in user changes.
   useEffect(() => {
-    if (user && user.role !== 'donor') {
+    if (user && user.role !== 'donor' && user.role !== 'collector') {
       dataService
         .getMessages(user.email)
         .then(setMessages)
@@ -440,6 +442,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       accountant: ['donations:write', 'expenses:write', 'transactions:read', 'reports:read', 'people:read', 'vendors:read', 'projects:read', 'accounts:read', 'receipts:write'],
       manager: ['projects:read', 'people:read', 'people:write', 'vendors:read', 'vendors:write', 'reports:read', 'dashboard:read'],
       viewer: ['dashboard:read', 'reports:read'],
+      collector: [],
       donor: ['donor:portal'],
     }
     const allowed = perms[role] || []
@@ -1399,6 +1402,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const value: AppContextValue = {
+    refreshCollectionsLedger: refreshAllSafe,
     user,
     login,
     logout,

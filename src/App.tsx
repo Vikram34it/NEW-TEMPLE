@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { MyDonationsPage } from './pages/MyDonationsPage'
 import { InstallmentsPage } from './pages/InstallmentsPage'
+import { CollectionsPage } from './pages/CollectionsPage'
 import { DonationsPage } from './pages/DonationsPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { PeoplePage } from './pages/PeoplePage'
@@ -41,6 +42,7 @@ export default function App() {
               }
             />
             <Route path="/installments" element={<RoleGuard roles={['admin', 'accountant']}><InstallmentsPage /></RoleGuard>} />
+            <Route path="/collections" element={<RoleGuard roles={['admin', 'collector']}><CollectionsPage /></RoleGuard>} />
             <Route path="/donations" element={<DonationsPage />} />
             <Route path="/expenses" element={<ExpensesPage />} />
             <Route path="/people" element={<PeoplePage />} />
@@ -77,6 +79,7 @@ export default function App() {
 function HomeRoute() {
   const { user } = useApp()
   const isDonor = user?.role === 'donor'
+  if (user?.role === 'collector') return <Navigate to="/collections" replace />
   if (isDonor) return <Navigate to="/my-donations" replace />
   return <DashboardPage />
 }

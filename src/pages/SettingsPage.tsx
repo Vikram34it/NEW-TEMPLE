@@ -334,7 +334,8 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
     case 'admin': return 'red'
     case 'accountant': return 'blue'
     case 'manager': return 'orange'
-    case 'viewer': return 'slate'
+    case 'viewer':
+    case 'collector': return 'slate'
     case 'donor': return 'violet'
   }
 }
@@ -384,6 +385,7 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
           <option value="accountant">Accountant</option>
           <option value="manager">Manager</option>
           <option value="viewer">Viewer</option>
+          <option value="collector">Collector</option>
           <option value="donor">Donor (own donations only)</option>
         </Select>
       </Field>

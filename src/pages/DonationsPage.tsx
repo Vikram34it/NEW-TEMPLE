@@ -6,6 +6,8 @@ import { Button, Modal, Badge, PageHeader, Field, Input, Select } from '../compo
 import { BulkUploadModal, type ImportColumn } from '../components/BulkUploadModal'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
+import { CONFIG } from '../config/apiConfig'
+import { CollectionReview } from './CollectionsPage'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ReceiptModal } from '../components/ReceiptModal'
 import { formatCurrency, formatDate, normalizePhone, parseDateInput } from '../utils/helpers'
@@ -31,7 +33,7 @@ const buildImportColumns = (donorNames: string[]): ImportColumn[] => [
 ]
 
 export function DonationsPage() {
-  const { donations, can, softDeleteDonation, bulkAddDonations, settings, people, updateDonation, linkDonorReceipts } = useApp()
+  const { user, donations, can, softDeleteDonation, bulkAddDonations, settings, people, updateDonation, linkDonorReceipts } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editDonation, setEditDonation] = useState<Donation | null>(null)
   const [viewDonation, setViewDonation] = useState<Donation | null>(null)
@@ -157,6 +159,8 @@ export function DonationsPage() {
           )
         }
       />
+
+      {user?.role === 'admin' && !CONFIG.useMockData && <CollectionReview />}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid grid-cols-2 lg:grid-cols-6 gap-3">
         <Field label="Donor link">

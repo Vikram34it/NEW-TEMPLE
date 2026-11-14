@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'accountant' | 'manager' | 'viewer' | 'donor'
+export type Role = 'admin' | 'accountant' | 'manager' | 'viewer' | 'donor' | 'collector'
 
 export interface User {
   userID: string
@@ -337,3 +337,62 @@ export interface BulkCampaignPayload {
 }
 
 export type { Settings as AppSettings }
+
+export interface CollectionDetails {
+  donorID: string
+  name: string
+  phone: string
+  email: string
+  address: string
+  office: string
+  mailing: string
+  pan: string
+  aadhaar: string
+  gotram: string
+  prayer1: string
+  prayerDate1: string
+  prayer2: string
+  prayerDate2: string
+  referrals: string
+  signature: string
+  signedDate: string
+  seva: string
+  category: string
+  kind: 'one-time' | 'installment' | 'materials'
+  planID: string
+  date: string
+  method: string
+  reference: string
+  amount?: number | string
+  quantity?: number | string
+  item: string
+  unit: string
+  delivery: string
+  site: string
+  deliveredDate?: string
+}
+
+export interface CollectionEntry {
+  id: string
+  collector: string
+  submittedAt: string
+  status: 'Pending review' | 'Needs correction' | 'Rejected' | 'Approved'
+  details: CollectionDetails
+  note: string
+  donationID: string
+  handover: { account: string; date: string; reference: string } | null
+}
+
+export interface CollectionDonor {
+  id: string
+  name: string
+  phoneEnd: string
+}
+
+export interface CollectionPlan {
+  id: string
+  purpose: string
+  outstanding: number
+  committed: number
+  nextDue: string
+}

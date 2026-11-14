@@ -10,6 +10,10 @@ import type {
   BulkSmsPart,
   Campaign,
   Communication,
+  CollectionDetails,
+  CollectionDonor,
+  CollectionEntry,
+  CollectionPlan,
   DashboardData,
   Donation,
   InstallmentPlan,
@@ -421,6 +425,28 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
+  getCollections(ownOnly = false): Promise<CollectionEntry[]> {
+    return apiFetch('getCollections', {}, { ownOnly })
+  },
+  findCollectionDonors(query: string): Promise<CollectionDonor[]> {
+    return apiFetch('findCollectionDonors', {}, { query })
+  },
+  getCollectionPlans(donorID: string): Promise<CollectionPlan[]> {
+    return apiFetch('getCollectionPlans', {}, { donorID })
+  },
+  submitCollection(id: string, details: CollectionDetails) {
+    return apiFetch('submitCollection', {}, { id, details })
+  },
+  reviewCollection(id: string, decision: CollectionEntry['status'], note: string, accountID: string, confirmBankCredit: boolean) {
+    return apiFetch('reviewCollection', {}, { id, decision, note, accountID, confirmBankCredit })
+  },
+  recordCollectionHandover(id: string, accountID: string, accountType: string, date: string, reference: string) {
+    return apiFetch('recordCollectionHandover', {}, { id, accountID, accountType, date, reference })
+  },
+  receiveCollectionMaterials(id: string, date: string, site: string) {
+    return apiFetch('receiveCollectionMaterials', {}, { id, date, site })
+  },
+
   requestDonorOtp(email: string) {
     return apiFetch('requestDonorOtp', {}, { email })
   },
