@@ -258,7 +258,7 @@ var WRITE_ROLES_ = Object.create(null);
 [
   ['admin accountant manager viewer', 'sendMessage markMessageRead deleteMessage'],
   ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
-  ['admin manager', 'createPerson updatePerson deletePerson createVendor updateVendor deleteVendor'],
+  ['admin manager', 'createPerson importDonorProfiles updatePerson deletePerson createVendor updateVendor deleteVendor'],
   ['admin accountant', 'createDonation bulkCreateDonations updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
 ].forEach(function (group) {
@@ -420,6 +420,7 @@ function route_(action, params, body, user) {
     case 'updateExpense': return updateRecord_(CONFIG.sheetNames.expenses, HEADERS.expenses, body.record, 'ExpenseID');
     case 'softDeleteExpense': return softDeleteRecord_(CONFIG.sheetNames.expenses, 'ExpenseID', body.id);
 
+    case 'importDonorProfiles': return importDonorProfiles_();
     case 'createPerson': return createRecord_(CONFIG.sheetNames.people, HEADERS.people, body.record, 'PER-', 'person', ['Name']);
     case 'updatePerson': return updateRecord_(CONFIG.sheetNames.people, HEADERS.people, body.record, 'PersonID');
     case 'deletePerson': return hardDeleteRecord_(CONFIG.sheetNames.people, 'PersonID', body.id);
@@ -1306,6 +1307,23 @@ function linkInstallmentPayment_(body) {
   }
   return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations,
     { DonationID: donation.DonationID, InstallmentPlanID: body.unlink === true ? '' : plan.PlanID }, 'DonationID', true);
+}
+
+function importDonorProfiles_() {
+  var people = readAll_(CONFIG.sheetNames.people, HEADERS.people);
+  var names = new Set(people.map(function (person) {
+    return String(person.Name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }));
+  var records = [];
+  readAll_(CONFIG.sheetNames.donations, HEADERS.donations).forEach(function (donation) {
+    var name = String(donation.DonorName || '').trim().replace(/\s+/g, ' ');
+    var key = name.toLowerCase();
+    if (!key || names.has(key) || /^(?:unknown(?: donor)?|anonymous(?: donor)?|n\/?a|-|—)$/i.test(name)) return;
+    names.add(key);
+    records.push({ Name: name, PersonType: 'Donor', Status: 'active' });
+  });
+  if (!records.length) return { created: 0 };
+  return bulkCreateRecords_(CONFIG.sheetNames.people, HEADERS.people, records, 'PER-', 'person', ['Name']);
 }
 
 function linkImportedDonor_(record, people) {

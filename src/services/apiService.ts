@@ -418,6 +418,10 @@ function isMoneyRecord(r: RecordName): boolean { return MONEY_RECORDS.includes(r
 let demoInstallmentPlans: InstallmentPlan[] = []
 
 export const dataService = {
+  async importDonorProfiles(): Promise<{ created: number }> {
+    return apiFetch('importDonorProfiles', {}, {}) as Promise<{ created: number }>
+  },
+
   async getInstallmentPlans(): Promise<InstallmentPlan[]> {
     if (CONFIG.useMockData) return demoInstallmentPlans
     const rows = await apiFetch('getInstallmentPlans') as Record<string, unknown>[]

@@ -27,11 +27,14 @@ const PERSON_IMPORT_COLUMNS: ImportColumn[] = [
 ]
 
 export function PeoplePage() {
-  const { people, donations, expenses, communications, can, deletePerson, bulkAddPeople } = useApp()
+  const { people, donations, expenses, communications, can, deletePerson, bulkAddPeople, importDonorProfiles } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editPerson, setEditPerson] = useState<Person | null>(null)
   const [viewPerson, setViewPerson] = useState<Person | null>(null)
   const [showBulk, setShowBulk] = useState(false)
+  const [importingDonors, setImportingDonors] = useState(false)
+  const [donorImportMessage, setDonorImportMessage] = useState('')
+  const [donorImportError, setDonorImportError] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
 
   const handleBulkImport = async (rows: Array<Record<string, unknown>>): Promise<string | null> => {
@@ -103,12 +106,31 @@ export function PeoplePage() {
         title="People"
         subtitle={`${people.length} people in the temple community`}
         action={can('people:write') && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" disabled={importingDonors} onClick={async () => {
+              setImportingDonors(true)
+              setDonorImportMessage('')
+              setDonorImportError('')
+              try {
+                const { created } = await importDonorProfiles()
+                setTypeFilter('Donor')
+                setDonorImportMessage(created
+                  ? 'Added ' + created + ' donor profile' + (created === 1 ? '' : 's') + '. Use Edit to add verified contact details.'
+                  : 'No new donor names to add.')
+              } catch (error) {
+                setDonorImportError(error instanceof Error ? error.message : 'Could not add donor profiles.')
+              } finally {
+                setImportingDonors(false)
+              }
+            }}><HandCoins size={16} /> {importingDonors ? 'Adding donors…' : 'Add donors from donations'}</Button>
             <Button variant="secondary" onClick={() => setShowBulk(true)}><Upload size={16} /> Import CSV</Button>
             <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Person</Button>
           </div>
         )}
       />
+
+      {donorImportMessage && <p role="status" className="text-sm text-slate-700">{donorImportMessage}</p>}
+      {donorImportError && <p role="alert" className="text-sm text-red-700">{donorImportError}</p>}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-2">
         <Button variant={typeFilter === '' ? 'primary' : 'secondary'} size="sm" onClick={() => setTypeFilter('')}>All</Button>

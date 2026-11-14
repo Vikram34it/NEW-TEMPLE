@@ -130,6 +130,7 @@ interface AppContextValue {
   addPerson: (p: Omit<Person, 'personID'>) => Promise<Person>
   updatePerson: (p: Person) => Promise<void>
   deletePerson: (id: string) => Promise<void>
+  importDonorProfiles: () => Promise<{ created: number }>
   bulkAddPeople: (items: Array<Omit<Person, 'personID'>>) => Promise<Person[]>
 
   addVendor: (v: Omit<Vendor, 'vendorID'>) => Promise<Vendor>
@@ -671,6 +672,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       audit('Delete', 'People', id)
     }
+  }
+
+  async function importDonorProfiles() {
+    if (CONFIG_USE_LIVE) {
+      const result = await dataService.importDonorProfiles()
+      await refreshAll()
+      return result
+    }
+    const cleanName = (name: string) => String(name || '').trim().replace(/\s+/g, ' ')
+    const names = new Set(people.map((person) => cleanName(person.name).toLowerCase()))
+    const profiles: Array<Omit<Person, 'personID'>> = []
+    for (const donation of donations) {
+      const name = cleanName(donation.donorName)
+      const key = name.toLowerCase()
+      if (donation.deleted || !key || names.has(key) || /^(?:unknown(?: donor)?|anonymous(?: donor)?|n\/?a|-|—)$/i.test(name)) continue
+      names.add(key)
+      profiles.push({
+        name, personType: ['Donor'], status: 'active',
+        phone: '', email: '', address: '', city: '', joinDate: '', notes: '',
+      })
+    }
+    if (profiles.length) await bulkAddPeople(profiles)
+    return { created: profiles.length }
   }
 
   async function bulkAddPeople(items: Array<Omit<Person, 'personID'>>): Promise<Person[]> {
@@ -1394,6 +1418,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updatePerson,
     deletePerson,
     bulkAddPeople,
+    importDonorProfiles,
     addVendor,
     updateVendor,
     deleteVendor,
