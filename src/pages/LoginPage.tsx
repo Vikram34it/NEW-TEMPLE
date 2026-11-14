@@ -26,7 +26,7 @@ const modes: { key: LoginMode; label: string }[] = [
 export function LoginPage() {
   const { user, login } = useApp()
   const navigate = useNavigate()
-  const [mode, setMode] = useState<LoginMode>('admin')
+  const [mode, setMode] = useState<LoginMode>('donor')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
