@@ -1,11 +1,12 @@
 import { Plus } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { DataTable, type Column } from '../components/DataTable'
 import { Button, Card, Field, Input, Modal, PageHeader, Select } from '../components/ui'
 import { CONFIG } from '../config/apiConfig'
 import { useApp } from '../context/AppContext'
 import { dataService } from '../services/apiService'
 import type { CollectionDetails, CollectionDonor, CollectionEntry, CollectionPlan } from '../types'
-import { formatCurrency, todayStr } from '../utils/helpers'
+import { formatCurrency, formatDate, formatDateTime, todayStr } from '../utils/helpers'
 
 const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
 const purposes = ['General Donation', 'Land Purchase', 'Temple Construction', 'Seva', 'Other']
@@ -36,6 +37,51 @@ export function CollectionsPage() {
   return <LiveCollectionsPage />
 }
 
+const statusColors: Record<CollectionEntry['status'], string> = {
+  'Pending review': 'bg-amber-50 text-amber-900',
+  'Needs correction': 'bg-rose-50 text-rose-900',
+  Approved: 'bg-emerald-50 text-emerald-900',
+  Rejected: 'bg-slate-100 text-slate-700',
+}
+
+function CollectionTable({ rows, admin = false, actions }: {
+  rows: CollectionEntry[]
+  admin?: boolean
+  actions: (row: CollectionEntry) => ReactNode
+}) {
+  const columns: Column<CollectionEntry>[] = [
+    { header: 'Collection date', accessor: ({ details, id }) => (
+      <><div>{formatDate(details.date)}</div><div className="text-xs text-slate-500">{id.slice(0, 12)}</div></>
+    ), className: 'whitespace-nowrap' },
+    { header: 'Donor', accessor: ({ details }) => <span className="font-medium">{details.name}</span> },
+    { header: 'Purpose / Seva', accessor: ({ details }) => (
+      <><div>{details.category || '—'}</div><div className="text-xs text-slate-500">{details.seva}</div></>
+    ) },
+    { header: 'Amount / Materials', accessor: ({ details }) => (
+      details.kind === 'materials'
+        ? <><div>{details.quantity} {details.unit} {details.item}</div><div className="text-xs text-slate-500">{details.delivery}</div></>
+        : <><div className="whitespace-nowrap font-medium tabular-nums">{formatCurrency(Number(details.amount))}</div>
+          <div className="text-xs text-slate-500">{details.kind === 'installment' ? 'Installment' : 'One-time'} · {details.method}</div>
+          {details.committedAmount && <div className="text-xs text-slate-500">{formatCurrency(Number(details.committedAmount))} pledged</div>}</>
+    ) },
+    { header: 'Reference', accessor: ({ details, donationID }) => (
+      <><div className="break-all">{details.reference || '—'}</div>{donationID && <div className="text-xs text-slate-500">{donationID}</div>}</>
+    ) },
+    { header: 'Status', accessor: (row) => (
+      <><span className={`inline-block whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${statusColors[row.status]}`}>{row.status}</span>
+        {row.handover && <div className="mt-1 text-xs text-slate-500">Handed over to {row.handover.account}</div>}
+        {row.status === 'Approved' && row.details.kind !== 'materials' && row.details.method === 'Cash' && !row.handover && (
+          <div className="mt-1 text-xs text-slate-500">Awaiting handover</div>
+        )}</>
+    ) },
+    { header: 'Review note', accessor: ({ note }) => note ? <span className="line-clamp-2 min-w-24 max-w-52 break-words">{note}</span> : '—' },
+  ]
+  if (admin) columns.splice(2, 0, { header: 'Collector', accessor: 'collector' })
+
+  return <DataTable columns={columns} data={rows} rowKey={(row) => row.id} actions={actions}
+    toolbar={<p className="text-xs text-slate-500">{rows.length} {rows.length === 1 ? 'submission' : 'submissions'}</p>} />
+}
+
 function LiveCollectionsPage() {
   const { user } = useApp()
   const [rows, setRows] = useState<CollectionEntry[]>([])
@@ -45,7 +91,7 @@ function LiveCollectionsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<CollectionEntry | null>(null)
   const [filter, setFilter] = useState<CollectionEntry['status'] | 'all'>('all')
-  const [showAll, setShowAll] = useState(false)
+  const [selected, setSelected] = useState<CollectionEntry | null>(null)
 
   async function load() {
     setLoading(true)
@@ -79,7 +125,7 @@ function LiveCollectionsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-7xl space-y-5">
       <section className="rounded-2xl bg-orange-950 p-5 text-white sm:p-7">
         <h1 className="text-2xl font-semibold">Collections</h1>
         <p className="mt-1 text-sm text-orange-100">Hare Krishna, {user?.name}. Record donations and materials from your visits.</p>
@@ -91,7 +137,7 @@ function LiveCollectionsPage() {
       {message && <p className="rounded-lg bg-emerald-50 p-3 text-emerald-800" role="status">{message}</p>}
 
       {formOpen && (
-        <div id="collection-entry" className="scroll-mt-4">
+        <div id="collection-entry" className="mx-auto max-w-3xl scroll-mt-4">
           <CollectionForm entry={editing} representative={user?.name || ''} onCancel={() => setFormOpen(false)} onSaved={async (id) => {
             setFormOpen(false)
             setMessage('Submitted for approval · ' + id.slice(0, 12))
@@ -104,7 +150,7 @@ function LiveCollectionsPage() {
       <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="Filter collections by status">
         {statuses.map(({ label, status, color }) => (
           <button key={status} type="button" aria-pressed={filter === status}
-            onClick={() => { setFilter(filter === status ? 'all' : status); setShowAll(false) }}
+            onClick={() => setFilter(filter === status ? 'all' : status)}
             className={`rounded-xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 sm:p-4 ${color} ${filter === status ? 'ring-2 ring-current' : ''}`}>
             <span className="block text-xl font-semibold tabular-nums">
               {loading || error ? '—' : rows.filter((row) => row.status === status).length}
@@ -119,7 +165,7 @@ function LiveCollectionsPage() {
           <h2 className="font-semibold">{filter === 'all' ? 'My Collections' : filter}</h2>
           <Button variant="secondary" disabled={loading} onClick={load}>Refresh</Button>
         </div>
-        {filter !== 'all' && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => { setFilter('all'); setShowAll(false) }}>Show all statuses</button>}
+        {filter !== 'all' && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => setFilter('all')}>Show all statuses</button>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         {loading && <p role="status" className="text-sm text-slate-500">Loading collections…</p>}
         {!loading && !filtered.length && !error && (
@@ -135,20 +181,21 @@ function LiveCollectionsPage() {
             ) : <p>No collections with this status.</p>}
           </div>
         )}
-        {filtered.slice(0, showAll ? filtered.length : 5).map((row) => (
-          <div key={row.id} className="space-y-1 border-t border-slate-100 pt-3 text-sm">
-            <p className="font-medium">{row.details.name} · {summary(row.details)}</p>
-            <p className="text-slate-600">{row.status} · {row.details.date} · {row.id.slice(0, 12)}</p>
-            {row.note && <p className="break-words text-slate-600">{row.note}</p>}
-            {row.status === 'Needs correction' && (
-              <Button variant="secondary" disabled={formOpen} onClick={() => openCollection(row)}>Correct submission</Button>
-            )}
-          </div>
-        ))}
-        {filtered.length > 5 && <Button variant="secondary" onClick={() => setShowAll(!showAll)}>
-          {showAll ? 'Show recent only' : 'Show all ' + filtered.length + ' submissions'}
-        </Button>}
+        {filtered.length > 0 && <CollectionTable key={filter} rows={filtered} actions={(row) => (
+          <Button variant="secondary" onClick={() => setSelected(row)}>View</Button>
+        )} />}
       </Card>
+      <Modal open={Boolean(selected)} onClose={() => setSelected(null)} title="Collection details" wide>
+        {selected && (
+          <div className="space-y-4">
+            <CollectionRecordDetails row={selected} />
+            {selected.status === 'Needs correction' && <Button disabled={formOpen} onClick={() => {
+              openCollection(selected)
+              setSelected(null)
+            }}>Correct submission</Button>}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -430,15 +477,9 @@ export function CollectionReview() {
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           {loading && <p className="text-sm text-slate-500">Loading collections…</p>}
           {!loading && !filtered.length && !error && <p className="text-sm text-slate-500">No collections in this view.</p>}
-          {filtered.map((row) => (
-            <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-sm">
-              <div>
-                <p className="font-medium">{row.details.name} · {summary(row.details)}</p>
-                <p className="text-slate-600">{row.collector} · {row.details.date} · {row.status}{row.handover ? ' · Handed over to ' + row.handover.account : ''}</p>
-              </div>
-              <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : 'View'}</Button>
-            </div>
-          ))}
+          {filtered.length > 0 && <CollectionTable key={view} rows={filtered} admin actions={(row) => (
+            <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : 'View'}</Button>
+          )} />}
         </>
       )}
       <Modal open={Boolean(selected)} onClose={() => setSelected(null)} title="Collection details" wide>
@@ -448,6 +489,36 @@ export function CollectionReview() {
         }} />}
       </Modal>
     </Card>
+  )
+}
+
+function CollectionRecordDetails({ row }: { row: CollectionEntry }) {
+  const data = row.details
+  const materials = data.kind === 'materials'
+  const cash = data.method === 'Cash'
+  const details = [
+    ['Donor', data.name], ['Mobile', data.phone], ['Email', data.email], ['Residential address', data.address],
+    ['Office address', data.office], ['Mail to', data.mailing], ['PAN ending', data.pan ? data.pan.slice(-4) : ''],
+    ['Aadhaar ending', data.aadhaar ? data.aadhaar.slice(-4) : ''], ['Gotram', data.gotram],
+    ['Prayer occasion', [data.prayer1, data.prayerDate1].filter(Boolean).join(' · ')],
+    ['Second prayer occasion', [data.prayer2, data.prayerDate2].filter(Boolean).join(' · ')], ['Referrals', data.referrals],
+    ['Seva', data.seva], ['Purpose', data.category],
+    ['Collection ID', row.id], ['Status', row.status], ['Submitted', formatDateTime(row.submittedAt)],
+    ['Collected by', row.collector], ['Collection date', formatDate(data.date)], ['Contribution', summary(data)],
+    ['Commitment', data.planID || (data.committedAmount ? 'New monthly commitment' : '')],
+    ['Total pledged', data.committedAmount ? formatCurrency(Number(data.committedAmount)) : ''],
+    ['Monthly installments', data.installmentCount], ['First installment due', data.firstDue],
+    ['Payment reference', materials || cash ? '' : data.reference],
+    ['Delivery site', materials ? data.site : ''], ['Delivery date', materials && data.delivery === 'Delivered' ? data.deliveredDate || data.date : ''],
+    ['Receipt record', row.donationID], ['Review note', row.note], ['Handed over to', row.handover?.account],
+    ['Handover date', row.handover?.date], ['Handover reference', row.handover?.reference],
+  ]
+  return (
+    <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+      {details.filter(([, value]) => value).map(([label, value]) => (
+        <div key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words font-medium">{value}</dd></div>
+      ))}
+    </dl>
   )
 }
 
@@ -481,29 +552,9 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
     }
   }
 
-  const details = [
-    ['Donor', data.name], ['Mobile', data.phone], ['Email', data.email], ['Residential address', data.address],
-    ['Office address', data.office], ['Mail to', data.mailing], ['PAN ending', data.pan ? data.pan.slice(-4) : ''],
-    ['Aadhaar ending', data.aadhaar ? data.aadhaar.slice(-4) : ''], ['Gotram', data.gotram],
-    ['Prayer occasion', [data.prayer1, data.prayerDate1].filter(Boolean).join(' · ')],
-    ['Second prayer occasion', [data.prayer2, data.prayerDate2].filter(Boolean).join(' · ')], ['Referrals', data.referrals],
-    ['Seva', data.seva], ['Purpose', data.category],
-    ['Collected by', row.collector], ['Collection date', data.date], ['Contribution', summary(data)],
-    ['Commitment', data.planID || (data.committedAmount ? 'New monthly commitment' : '')],
-    ['Total pledged', data.committedAmount ? formatCurrency(Number(data.committedAmount)) : ''],
-    ['Monthly installments', data.installmentCount], ['First installment due', data.firstDue],
-    ['Payment reference', materials || cash ? '' : data.reference],
-    ['Delivery site', materials ? data.site : ''], ['Delivery date', materials && data.delivery === 'Delivered' ? data.deliveredDate || data.date : ''],
-    ['Receipt record', row.donationID], ['Review note', row.note], ['Handed over to', row.handover?.account],
-    ['Handover date', row.handover?.date], ['Handover reference', row.handover?.reference],
-  ]
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-        {details.filter(([, value]) => value).map(([label, value]) => (
-          <div key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words font-medium">{value}</dd></div>
-        ))}
-      </dl>
+      <CollectionRecordDetails row={row} />
       {((pending && !materials && !cash) || handover) && (
         <Field label={handover ? 'Destination account' : 'Bank account'} required>
           <Select value={accountID} onChange={(e) => { setAccountID(e.target.value); setConfirmed(false) }}>
