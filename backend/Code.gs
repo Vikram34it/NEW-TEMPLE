@@ -1440,7 +1440,7 @@ function collectionDetails_(body) {
   var input = body.details || {};
   var fields = { donorID: 40, name: 150, phone: 30, email: 254, address: 600, office: 600, mailing: 20, pan: 10, aadhaar: 12,
     gotram: 100, prayer1: 150, prayerDate1: 10, prayer2: 150, prayerDate2: 10, referrals: 1000, signature: 150,
-    signedDate: 10, seva: 20, category: 60, kind: 20, planID: 40, date: 10, method: 20, reference: 120,
+    signedDate: 10, seva: 20, category: 60, kind: 20, planID: 64, date: 10, method: 20, reference: 120,
     item: 150, unit: 40, delivery: 20, site: 150 };
   var data = {};
   Object.keys(fields).forEach(function (key) { data[key] = collectionText_(input[key], fields[key]); });
@@ -1484,13 +1484,55 @@ function collectionDetails_(body) {
   if (!/^(one-time|installment)$/.test(data.kind) || !/^\d+(?:\.\d{1,2})?$/.test(amount) ||
       data.amount <= 0 || data.amount > 1000000000 || !/^(Cash|UPI|Bank Transfer|Cheque)$/.test(data.method) ||
       (data.method !== 'Cash' && !data.reference)) throw new Error('Enter a valid amount, payment method and reference.');
-  if (data.kind === 'installment') {
+  if (data.kind === 'installment' && data.planID) {
     var plan = getCollectionPlans_({ donorID: data.donorID }).find(function (row) { return row.id === data.planID; });
     if (!plan || Math.round(data.amount * 100) > Math.round(plan.outstanding * 100)) {
       throw new Error('Choose an existing commitment and enter an amount within its outstanding balance.');
     }
+  } else if (data.kind === 'installment') {
+    data.committedAmount = collectionText_(input.committedAmount, 16);
+    data.installmentCount = collectionText_(input.installmentCount, 3);
+    data.firstDue = collectionText_(input.firstDue, 10);
+    collectionSchedule_(data);
   } else data.planID = '';
   return data;
+}
+
+function collectionSchedule_(data) {
+  var total = Math.round(Number(data.committedAmount) * 100);
+  var count = Number(data.installmentCount);
+  if (!/^\d+(?:\.\d{1,2})?$/.test(data.committedAmount) || total > 100000000000 ||
+      !Number.isInteger(count) || count < 2 || count > 120 || total < count ||
+      Math.round(data.amount * 100) >= total || !collectionDate_(data.firstDue)) {
+    throw new Error('Enter a pledge larger than the payment, 2–120 monthly installments, and a valid first due date.');
+  }
+  var first = new Date(data.firstDue + 'T00:00:00Z');
+  var base = Math.floor(total / count);
+  var remainder = total % count;
+  return Array.from({ length: count }, function (_, index) {
+    var year = first.getUTCFullYear();
+    var month = first.getUTCMonth() + index;
+    var lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    var due = new Date(Date.UTC(year, month, Math.min(first.getUTCDate(), lastDay)));
+    return { due: due.toISOString().slice(0, 10), paise: base + (index < remainder ? 1 : 0) };
+  });
+}
+
+function collectionCreatePlan_(id, data, donorID) {
+  var planID = 'PLAN-' + id;
+  var name = CONFIG.sheetNames.installmentPlans;
+  var headers = HEADERS.installmentPlans;
+  var plans = readAll_(name, headers);
+  var record = plans.find(function (plan) { return plan.PlanID === planID; });
+  var schedule = JSON.stringify(collectionSchedule_(data));
+  if (record) {
+    if (String(record.DonorID) !== String(donorID) || record.Schedule !== schedule) {
+      throw new Error('The previously created commitment needs reconciliation.');
+    }
+  } else {
+    sheet_(name).appendRow([planID, donorID, sheetValue_(data.category + ' · ' + data.seva), schedule, '']);
+  }
+  return planID;
 }
 
 function updateCollection_(row, changes) {
@@ -1554,7 +1596,10 @@ function reviewCollection_(body, user) {
   var donations = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
   var receipt = donations.find(function (d) { return d.CollectionID === row.CollectionID; });
   if (receipt && !notDeleted_(receipt)) throw new Error('The collection receipt was cancelled. Review it in Donations.');
-  if (receipt && decision !== 'Approved') throw new Error('Approval has started. Retry approval to finish posting.');
+  if (decision !== 'Approved' && (receipt || (data.committedAmount &&
+      readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).some(function (plan) {
+        return plan.PlanID === 'PLAN-' + row.CollectionID;
+      })))) throw new Error('Approval has started. Retry approval to finish posting.');
   if (decision === 'Approved') {
     if (data.kind !== 'materials' && !receipt) {
       var account = data.method === 'Cash' ? cashWithCollectors_() : collectionAccount_(body.accountID, 'bank');
@@ -1586,6 +1631,9 @@ function reviewCollection_(body, user) {
       }
       var donor = data.donorID ? collectionPerson_(data.donorID) : enrollCollectionDonor_(data, row.CollectionID);
       if (!donor) throw new Error('The donor profile is no longer active.');
+      if (data.kind === 'installment' && !data.planID) {
+        data.planID = collectionCreatePlan_(row.CollectionID, data, donor.PersonID);
+      }
       receipt = postCollectionDonation_(row, data, donor, account, matched[0], donations);
     } else if (data.kind === 'materials') {
       var materialDonor = data.donorID ? collectionPerson_(data.donorID) : enrollCollectionDonor_(data, row.CollectionID);
@@ -1597,6 +1645,7 @@ function reviewCollection_(body, user) {
     throw new Error('Enter a review note when returning or rejecting a submission.');
   }
   if (receipt && !data.donorID) data.donorID = String(receipt.DonorID);
+  if (receipt && receipt.InstallmentPlanID) data.planID = String(receipt.InstallmentPlanID);
   updateCollection_(row, { Status: decision, ReviewNote: note, ReviewedBy: user.Email, ReviewedAt: new Date().toISOString(),
     DonationID: receipt ? receipt.DonationID : '', Details: JSON.stringify(data) });
   audit_('collections', decision, row.CollectionID, '', '');

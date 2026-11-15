@@ -361,6 +361,9 @@ export interface CollectionDetails {
   kind: 'one-time' | 'installment' | 'materials'
   planID: string
   date: string
+  committedAmount?: string
+  installmentCount?: string
+  firstDue?: string
   method: string
   reference: string
   amount?: number | string

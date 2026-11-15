@@ -27,7 +27,7 @@ function errorText(error: unknown) {
 function summary(details: CollectionDetails) {
   return details.kind === 'materials'
     ? [details.quantity, details.unit, details.item, '·', details.delivery].join(' ')
-    : formatCurrency(Number(details.amount)) + ' · ' + details.method + (details.planID ? ' · Installment' : '')
+    : formatCurrency(Number(details.amount)) + ' · ' + details.method + (details.kind === 'installment' ? ' · Installment' : '')
 }
 
 export function CollectionsPage() {
@@ -292,7 +292,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
               <Field label="Contribution type" required>
                 <Select value={data.kind} onChange={(e) => setData({ ...data, kind: e.target.value as CollectionDetails['kind'], planID: '', ...(e.target.value === 'materials' ? { category: 'Temple Construction' } : {}) })}>
                   <option value="one-time">One-time payment</option>
-                  <option value="installment" disabled={!donorSelected}>Installment payment</option>
+                  <option value="installment">Installment payment</option>
                   <option value="materials">Construction materials</option>
                 </Select>
               </Field>
@@ -307,12 +307,22 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
               {field('Collection date', 'date', { required: true, type: 'date' })}
               {data.kind === 'installment' && (
                 <div className="space-y-2 sm:col-span-2">
-                  <Field label="Existing commitment" required>
-                    <Select required value={data.planID} onChange={(e) => change('planID', e.target.value)}>
-                      <option value="">{plans.some((item) => item.outstanding > 0) ? 'Select commitment' : 'No open commitments found'}</option>
+                  <Field label="Commitment" required>
+                    <Select value={data.planID} onChange={(e) => change('planID', e.target.value)}>
+                      <option value="">Set up a new commitment</option>
                       {plans.filter((item) => item.outstanding > 0).map((item) => <option key={item.id} value={item.id}>{item.purpose} · {formatCurrency(item.outstanding)} outstanding</option>)}
                     </Select>
                   </Field>
+                  {!data.planID && (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {field('Total pledged (₹)', 'committedAmount', { required: true, inputMode: 'decimal', pattern: '[0-9]+([.][0-9]{1,2})?' })}
+                      {field('Monthly installments', 'installmentCount', { required: true, type: 'number', min: 2, max: 120, step: 1 })}
+                      {field('First installment due', 'firstDue', { required: true, type: 'date' })}
+                      <p className="text-sm text-slate-600 sm:col-span-3">
+                        The plan and payment will be recorded after admin approval. Enter only the amount you received today below.
+                      </p>
+                    </div>
+                  )}
                   {plan && <p className="text-sm text-slate-600">Committed {formatCurrency(plan.committed)} · Next due {plan.nextDue || '—'} · Balance after approval {formatCurrency(Math.max(0, plan.outstanding - Number(data.amount || 0)))}</p>}
                 </div>
               )}
@@ -467,7 +477,10 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
     ['Second prayer occasion', [data.prayer2, data.prayerDate2].filter(Boolean).join(' · ')], ['Referrals', data.referrals],
     ['Signature name', data.signature], ['Signed on', data.signedDate], ['Seva', data.seva], ['Purpose', data.category],
     ['Collected by', row.collector], ['Collection date', data.date], ['Contribution', summary(data)],
-    ['Commitment', data.planID], ['Payment reference', materials || cash ? '' : data.reference],
+    ['Commitment', data.planID || (data.committedAmount ? 'New monthly commitment' : '')],
+    ['Total pledged', data.committedAmount ? formatCurrency(Number(data.committedAmount)) : ''],
+    ['Monthly installments', data.installmentCount], ['First installment due', data.firstDue],
+    ['Payment reference', materials || cash ? '' : data.reference],
     ['Delivery site', materials ? data.site : ''], ['Delivery date', materials && data.delivery === 'Delivered' ? data.deliveredDate || data.date : ''],
     ['Receipt record', row.donationID], ['Review note', row.note], ['Handed over to', row.handover?.account],
     ['Handover date', row.handover?.date], ['Handover reference', row.handover?.reference],
