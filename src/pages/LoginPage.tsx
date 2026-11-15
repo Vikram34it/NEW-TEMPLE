@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
+import { homePathForRole } from '../navigation'
 import { CONFIG } from '../config/apiConfig'
 import { dataService } from '../services/apiService'
 import templeImage from '../assets/temple-donor.png'
@@ -20,7 +21,6 @@ const staffRoles: Role[] = ['admin', 'accountant', 'manager', 'viewer', 'collect
 
 export function LoginPage({ staff = false }: { staff?: boolean }) {
   const { user, users, login } = useApp()
-  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -47,7 +47,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
     return () => { active = false }
   }, [staff, user])
 
-  if (user) return <Navigate to="/" replace />
+  if (user) return <Navigate to={homePathForRole(user.role)} replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -55,11 +55,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
     setError('')
     const err = await login(email, password, staff)
     setBusy(false)
-    if (err) {
-      setError(err)
-    } else {
-      navigate('/')
-    }
+    if (err) setError(err)
   }
 
   const isDonorMode = !staff

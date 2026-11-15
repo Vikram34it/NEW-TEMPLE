@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { Header } from '../components/Header'
-import { NAV_SECTIONS } from '../navigation'
+import { NAV_SECTIONS, homePathForRole } from '../navigation'
 import { useApp } from '../context/AppContext'
 
 export function AppLayout() {
@@ -23,13 +23,14 @@ export function AppLayout() {
 
   if (!user) return <Navigate to="/login" replace />
 
-  // Donors may only use their own-donations portal. Block every staff page.
-  if (user.role === 'donor' && location.pathname !== '/my-donations') {
-    return <Navigate to="/my-donations" replace />
+  const homePath = homePathForRole(user.role)
+  const path = location.pathname.replace(/\/+$/, '') || '/'
+  if (homePath !== '/' && path !== homePath) {
+    return <Navigate to={homePath} replace />
   }
 
-  const page = NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.path === location.pathname)
-  if (page && !page.roles.includes(user.role)) return <Navigate to="/" replace />
+  const page = NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.path === path)
+  if (page && !page.roles.includes(user.role)) return <Navigate to={homePath} replace />
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -51,7 +52,7 @@ export function RoleGuard({ roles, children }: { roles: string[]; children: Reac
   // If the user has any of the required roles, allow access
   const hasAccess = roles.some((r) => r === user.role)
   if (!hasAccess) {
-    return <Navigate to="/" replace />
+    return <Navigate to={homePathForRole(user.role)} replace />
   }
   return <>{children}</>
 }

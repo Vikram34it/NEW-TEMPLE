@@ -1,5 +1,11 @@
 import type { Role } from './types'
 
+export function homePathForRole(role: Role) {
+  if (role === 'collector') return '/collections'
+  if (role === 'donor') return '/my-donations'
+  return '/'
+}
+
 export interface NavItem {
   path: string
   label: string
