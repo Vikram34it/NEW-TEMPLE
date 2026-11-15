@@ -354,8 +354,6 @@ export interface CollectionDetails {
   prayer2: string
   prayerDate2: string
   referrals: string
-  signature: string
-  signedDate: string
   seva: string
   category: string
   kind: 'one-time' | 'installment' | 'materials'

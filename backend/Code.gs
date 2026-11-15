@@ -1439,8 +1439,8 @@ function collectionDate_(value) {
 function collectionDetails_(body) {
   var input = body.details || {};
   var fields = { donorID: 40, name: 150, phone: 30, email: 254, address: 600, office: 600, mailing: 20, pan: 10, aadhaar: 12,
-    gotram: 100, prayer1: 150, prayerDate1: 10, prayer2: 150, prayerDate2: 10, referrals: 1000, signature: 150,
-    signedDate: 10, seva: 20, category: 60, kind: 20, planID: 64, date: 10, method: 20, reference: 120,
+    gotram: 100, prayer1: 150, prayerDate1: 10, prayer2: 150, prayerDate2: 10, referrals: 1000,
+    seva: 20, category: 60, kind: 20, planID: 64, date: 10, method: 20, reference: 120,
     item: 150, unit: 40, delivery: 20, site: 150 };
   var data = {};
   Object.keys(fields).forEach(function (key) { data[key] = collectionText_(input[key], fields[key]); });
@@ -1452,7 +1452,7 @@ function collectionDetails_(body) {
     var person = collectionPerson_(data.donorID);
     if (!person) throw new Error('Choose an active donor.');
     data.name = String(person.Name);
-    ['phone','email','address','office','mailing','pan','aadhaar','gotram','prayer1','prayerDate1','prayer2','prayerDate2','referrals','signature','signedDate'].forEach(function (key) {
+    ['phone','email','address','office','mailing','pan','aadhaar','gotram','prayer1','prayerDate1','prayer2','prayerDate2','referrals'].forEach(function (key) {
       data[key] = '';
     });
   } else {
@@ -1460,8 +1460,8 @@ function collectionDetails_(body) {
     data.pan = data.pan.toUpperCase();
     if (!data.name || !/^\d{10}$/.test(data.phone) || !data.address || !/^\d{12}$/.test(data.aadhaar) ||
         !/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan) || !/^(Residence|Office)$/.test(data.mailing) ||
-        (data.mailing === 'Office' && !data.office) || !data.signature || !collectionDate_(data.signedDate)) {
-      throw new Error('Complete the donor enrollment details, including the signature name and date.');
+        (data.mailing === 'Office' && !data.office)) {
+      throw new Error('Complete the required donor enrollment details.');
     }
   }
   if ((data.prayerDate1 && !collectionDate_(data.prayerDate1)) || (data.prayerDate2 && !collectionDate_(data.prayerDate2))) {
@@ -1662,7 +1662,7 @@ function enrollCollectionDonor_(data, id) {
   }
   return createRecord_(CONFIG.sheetNames.people, HEADERS.people, {
     Name: data.name, Phone: data.phone, Email: data.email, Address: data.address,
-    PersonType: 'Donor', Status: 'active', JoinDate: data.signedDate, Notes: marker
+    PersonType: 'Donor', Status: 'active', JoinDate: collectionDate_(data.signedDate) ? data.signedDate : data.date, Notes: marker
   }, 'PER-', 'person', ['Name']);
 }
 

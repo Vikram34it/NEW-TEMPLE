@@ -15,7 +15,7 @@ function emptyCollection(): CollectionDetails {
   return {
     donorID: '', name: '', phone: '', email: '', address: '', office: '', mailing: 'Residence',
     pan: '', aadhaar: '', gotram: '', prayer1: '', prayerDate1: '', prayer2: '', prayerDate2: '', referrals: '',
-    signature: '', signedDate: todayStr(), seva: '', category: 'General Donation', kind: 'one-time',
+    seva: '', category: 'General Donation', kind: 'one-time',
     planID: '', date: todayStr(), method: 'Cash', reference: '', item: '', unit: '', delivery: 'Promised', site: '',
   }
 }
@@ -268,8 +268,6 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
               </Field>
               {field('Aadhaar number', 'aadhaar', { required: true, type: 'password', inputMode: 'numeric', pattern: '[0-9]{12}', maxLength: 12, autoComplete: 'off' })}
               {field('PAN', 'pan', { required: true, type: 'password', pattern: '[A-Za-z]{5}[0-9]{4}[A-Za-z]', maxLength: 10, autoComplete: 'off' })}
-              {field('Donor signature name', 'signature', { required: true, maxLength: 150 })}
-              {field('Date signed', 'signedDate', { required: true, type: 'date' })}
               <details className="space-y-3 sm:col-span-2">
                 <summary className="cursor-pointer font-medium">Prayer occasions and referrals</summary>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -475,7 +473,7 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
     ['Aadhaar ending', data.aadhaar ? data.aadhaar.slice(-4) : ''], ['Gotram', data.gotram],
     ['Prayer occasion', [data.prayer1, data.prayerDate1].filter(Boolean).join(' · ')],
     ['Second prayer occasion', [data.prayer2, data.prayerDate2].filter(Boolean).join(' · ')], ['Referrals', data.referrals],
-    ['Signature name', data.signature], ['Signed on', data.signedDate], ['Seva', data.seva], ['Purpose', data.category],
+    ['Seva', data.seva], ['Purpose', data.category],
     ['Collected by', row.collector], ['Collection date', data.date], ['Contribution', summary(data)],
     ['Commitment', data.planID || (data.committedAmount ? 'New monthly commitment' : '')],
     ['Total pledged', data.committedAmount ? formatCurrency(Number(data.committedAmount)) : ''],
