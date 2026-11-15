@@ -381,6 +381,8 @@ export interface CollectionEntry {
   details: CollectionDetails
   note: string
   donationID: string
+  contact?: { phone: string; email: string }
+  installment?: CollectionPlan | null
   handover: { account: string; date: string; reference: string } | null
 }
 
@@ -396,4 +398,8 @@ export interface CollectionPlan {
   outstanding: number
   committed: number
   nextDue: string
+  received: number
+  paidCount: number
+  pendingCount: number
+  nextAmount: number
 }

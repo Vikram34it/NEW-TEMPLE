@@ -1400,27 +1400,78 @@ function getCollectionPlans_(body) {
   return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).filter(function (plan) {
     return String(plan.DonorID) === body.donorID;
   }).map(function (plan) {
-    var schedule = JSON.parse(plan.Schedule);
     var paid = donations.reduce(function (sum, donation) {
-      return donation.InstallmentPlanID === plan.PlanID ? sum + Math.round(Number(donation.Amount) * 100) : sum;
+      return donation.InstallmentPlanID === plan.PlanID && String(donation.DonorID) === String(plan.DonorID)
+        ? sum + Math.round(Number(donation.Amount) * 100) : sum;
     }, 0);
-    var committed = schedule.reduce(function (sum, item) { return sum + item.paise; }, 0);
-    var scheduled = 0;
-    var next = schedule.find(function (item) { scheduled += item.paise; return scheduled > paid; });
-    return { id: plan.PlanID, purpose: plan.Purpose, outstanding: Math.max(committed - paid, 0) / 100,
-      committed: committed / 100, nextDue: next ? next.due : '' };
+    return collectionPlanProgress_(plan, paid);
   });
 }
 
+function collectionPlanProgress_(plan, paid) {
+  var schedule = JSON.parse(plan.Schedule);
+  var committed = 0;
+  var paidCount = 0;
+  var nextDue = '';
+  var nextAmount = 0;
+  schedule.forEach(function (item) {
+    committed += item.paise;
+    if (committed <= paid) paidCount++;
+    else if (!nextDue) {
+      nextDue = item.due;
+      nextAmount = Math.min(item.paise, committed - paid) / 100;
+    }
+  });
+  return { id: plan.PlanID, purpose: plan.Purpose, committed: committed / 100, received: paid / 100,
+    outstanding: Math.max(committed - paid, 0) / 100, paidCount: paidCount,
+    pendingCount: schedule.length - paidCount, nextDue: nextDue, nextAmount: nextAmount };
+}
+
 function getCollections_(user, ownOnly) {
-  return collectionRows_().filter(function (row) {
+  var rows = collectionRows_().filter(function (row) {
     return (user.Role === 'admin' && !ownOnly) || String(row.CollectorID) === String(user.UserID);
-  }).reverse().map(function (row) {
-    var details = JSON.parse(row.Details);
+  }).reverse();
+  if (!rows.length) return [];
+  var people = new Map(readAll_(CONFIG.sheetNames.people, HEADERS.people).map(function (person) {
+    return [String(person.PersonID), person];
+  }));
+  var detailsByRow = rows.map(function (row) { return JSON.parse(row.Details); });
+  var planIDs = new Set(detailsByRow.map(function (details) { return String(details.planID || ''); }).filter(Boolean));
+  var progress = new Map();
+  if (planIDs.size) {
+    var plans = readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).filter(function (plan) {
+      return planIDs.has(String(plan.PlanID));
+    });
+    var planByID = new Map(plans.map(function (plan) { return [String(plan.PlanID), plan]; }));
+    var paid = new Map();
+    readAll_(CONFIG.sheetNames.donations, HEADERS.donations).forEach(function (donation) {
+      var id = String(donation.InstallmentPlanID || '');
+      var plan = planByID.get(id);
+      if (plan && String(plan.DonorID) === String(donation.DonorID)) {
+        paid.set(id, (paid.get(id) || 0) + Math.round(Number(donation.Amount) * 100));
+      }
+    });
+    plans.forEach(function (plan) {
+      var id = String(plan.PlanID);
+      try {
+        progress.set(id, { donorID: String(plan.DonorID), summary: collectionPlanProgress_(plan, paid.get(id) || 0) });
+      } catch (err) {
+        // A malformed schedule should not prevent Collections from loading.
+      }
+    });
+  }
+  return rows.map(function (row, index) {
+    var details = detailsByRow[index];
+    var person = people.get(String(details.donorID || ''));
+    var contact = person && String(person.Status).toLowerCase() === 'active' ? person : null;
+    var plan = progress.get(String(details.planID || ''));
     if (details.aadhaar) details.aadhaar = '•••• ' + details.aadhaar.slice(-4);
     if (details.pan) details.pan = '••••••' + details.pan.slice(-4);
     return { id: row.CollectionID, collector: row.CollectorName, submittedAt: row.SubmittedAt,
       status: row.Status, details: details, note: row.ReviewNote, donationID: row.DonationID,
+      contact: { phone: String(contact ? contact.Phone || '' : details.donorID ? '' : details.phone || ''),
+        email: String(contact ? contact.Email || '' : details.donorID ? '' : details.email || '') },
+      installment: plan && plan.donorID === String(details.donorID) ? plan.summary : null,
       handover: row.Handover ? JSON.parse(row.Handover) : null };
   });
 }

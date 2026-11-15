@@ -1,12 +1,12 @@
 import { Plus } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DataTable, type Column } from '../components/DataTable'
-import { Button, Card, Field, Input, Modal, PageHeader, Select } from '../components/ui'
+import { Button, Card, Field, Input, Modal, PageHeader, Select, Textarea } from '../components/ui'
 import { CONFIG } from '../config/apiConfig'
 import { useApp } from '../context/AppContext'
 import { dataService } from '../services/apiService'
 import type { CollectionDetails, CollectionDonor, CollectionEntry, CollectionPlan } from '../types'
-import { formatCurrency, formatDate, formatDateTime, todayStr } from '../utils/helpers'
+import { formatCurrency, formatDate, formatDateTime, normalizePhone, todayStr } from '../utils/helpers'
 
 const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
 const purposes = ['General Donation', 'Land Purchase', 'Temple Construction', 'Seva', 'Other']
@@ -67,6 +67,13 @@ function CollectionTable({ rows, admin = false, actions }: {
     { header: 'Reference', accessor: ({ details, donationID }) => (
       <><div className="break-all">{details.reference || '—'}</div>{donationID && <div className="text-xs text-slate-500">{donationID}</div>}</>
     ) },
+    { header: 'Installment progress', accessor: ({ installment, details, status }) => installment ? (
+      <div className="min-w-32 text-xs">
+        <div className="font-medium">{installment.paidCount} paid · {installment.pendingCount} pending</div>
+        <div>{formatCurrency(installment.outstanding)} outstanding</div>
+        {installment.nextDue && <div className="text-slate-500">Due {formatDate(installment.nextDue)}</div>}
+      </div>
+    ) : details.kind === 'installment' ? (status === 'Pending review' ? 'Awaiting approval' : 'Unavailable') : '—' },
     { header: 'Status', accessor: (row) => (
       <><span className={`inline-block whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium ${statusColors[row.status]}`}>{row.status}</span>
         {row.handover && <div className="mt-1 text-xs text-slate-500">Handed over to {row.handover.account}</div>}
@@ -189,6 +196,7 @@ function LiveCollectionsPage() {
         {selected && (
           <div className="space-y-4">
             <CollectionRecordDetails row={selected} />
+            <CollectionMessage row={selected} />
             {selected.status === 'Needs correction' && <Button disabled={formOpen} onClick={() => {
               openCollection(selected)
               setSelected(null)
@@ -508,6 +516,12 @@ function CollectionRecordDetails({ row }: { row: CollectionEntry }) {
     ['Commitment', data.planID || (data.committedAmount ? 'New monthly commitment' : '')],
     ['Total pledged', data.committedAmount ? formatCurrency(Number(data.committedAmount)) : ''],
     ['Monthly installments', data.installmentCount], ['First installment due', data.firstDue],
+    ['Installments fully paid', row.installment?.paidCount.toString()],
+    ['Installments pending', row.installment?.pendingCount.toString()],
+    ['Total received for plan', row.installment && formatCurrency(row.installment.received)],
+    ['Outstanding', row.installment && formatCurrency(row.installment.outstanding)],
+    ['Next unpaid installment', row.installment?.nextDue
+      ? formatCurrency(row.installment.nextAmount) + ' due ' + formatDate(row.installment.nextDue) : ''],
     ['Payment reference', materials || cash ? '' : data.reference],
     ['Delivery site', materials ? data.site : ''], ['Delivery date', materials && data.delivery === 'Delivered' ? data.deliveredDate || data.date : ''],
     ['Receipt record', row.donationID], ['Review note', row.note], ['Handed over to', row.handover?.account],
@@ -519,6 +533,54 @@ function CollectionRecordDetails({ row }: { row: CollectionEntry }) {
         <div key={label}><dt className="text-slate-500">{label}</dt><dd className="break-words font-medium">{value}</dd></div>
       ))}
     </dl>
+  )
+}
+
+function CollectionMessage({ row }: { row: CollectionEntry }) {
+  const { settings } = useApp()
+  const [mode, setMode] = useState<'greeting' | 'reminder' | null>(null)
+  const [draft, setDraft] = useState('')
+  const plan = row.installment
+  const phone = normalizePhone(row.contact?.phone ?? row.details.phone)
+  const whatsapp = /^\d{10}$/.test(phone) ? '91' + phone : ''
+  const email = (row.contact?.email ?? row.details.email ?? '').trim()
+  const emailAvailable = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(email)
+  const canRemind = row.status === 'Approved' && Boolean(plan && plan.pendingCount > 0)
+
+  function prepare(type: 'greeting' | 'reminder') {
+    setMode(type)
+    setDraft(type === 'reminder' && plan
+      ? [
+        'Hare Krishna, ' + row.details.name + '.',
+        'A gentle reminder about your commitment towards ' + plan.purpose + '.',
+        plan.paidCount + ' installments are fully paid and ' + plan.pendingCount + ' are pending. Total outstanding: ' + formatCurrency(plan.outstanding) + '.',
+        plan.nextDue ? 'The next unpaid installment has ' + formatCurrency(plan.nextAmount) + ' remaining, due ' + formatDate(plan.nextDue) + '.' : '',
+        'Thank you for your support.\n' + settings.templeName,
+      ].filter(Boolean).join('\n\n')
+      : 'Hare Krishna, ' + row.details.name + '.\n\nWarm greetings from ' + settings.templeName + '. Thank you for your support.')
+  }
+
+  return (
+    <section className="space-y-3 border-t border-slate-200 pt-4">
+      <h3 className="text-sm font-semibold">Message donor</h3>
+      {!whatsapp && !emailAvailable ? <p className="text-sm text-slate-500">No usable mobile number or email is available for this donor.</p> : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => prepare('greeting')}>Write greeting</Button>
+            {canRemind && <Button variant="secondary" onClick={() => prepare('reminder')}>Write installment reminder</Button>}
+          </div>
+          {mode && (
+            <>
+              <Field label="Message"><Textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={6} /></Field>
+              {draft.trim() && <div className="flex flex-wrap gap-4 text-sm font-medium text-orange-700 underline">
+                {whatsapp && <a href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(draft)}`} target="_blank" rel="noopener noreferrer">WhatsApp draft to +{whatsapp}</a>}
+                {emailAvailable && <a className="break-all" href={`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(mode === 'reminder' ? 'Installment reminder' : 'Greetings from ' + settings.templeName)}&body=${encodeURIComponent(draft)}`}>Email draft to {email}</a>}
+              </div>}
+            </>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
@@ -555,6 +617,7 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   return (
     <div className="space-y-4">
       <CollectionRecordDetails row={row} />
+      <CollectionMessage row={row} />
       {((pending && !materials && !cash) || handover) && (
         <Field label={handover ? 'Destination account' : 'Bank account'} required>
           <Select value={accountID} onChange={(e) => { setAccountID(e.target.value); setConfirmed(false) }}>
