@@ -1479,10 +1479,12 @@ function collectionDetails_(body) {
     return data;
   }
   if (data.method === 'Cash') data.reference = '';
-  var amount = String(input.amount || '');
+  var amount = String(input.amount || '').trim();
   data.amount = Number(amount);
-  if (!/^(one-time|installment)$/.test(data.kind) || !/^\d+(?:\.\d{1,2})?$/.test(amount) ||
-      data.amount <= 0 || data.amount > 1000000000 || !/^(Cash|UPI|Bank Transfer|Cheque)$/.test(data.method) ||
+  if (!/^\d+$/.test(amount) || data.amount <= 0 || data.amount > 1000000000) {
+    throw new Error('Enter a positive whole-rupee amount up to ₹1,00,00,00,000.');
+  }
+  if (!/^(one-time|installment)$/.test(data.kind) || !/^(Cash|UPI|Bank Transfer|Cheque)$/.test(data.method) ||
       (data.method !== 'Cash' && !data.reference)) throw new Error('Enter a valid amount, payment method and reference.');
   if (data.kind === 'installment' && data.planID) {
     var plan = getCollectionPlans_({ donorID: data.donorID }).find(function (row) { return row.id === data.planID; });
@@ -1491,6 +1493,7 @@ function collectionDetails_(body) {
     }
   } else if (data.kind === 'installment') {
     data.committedAmount = collectionText_(input.committedAmount, 16);
+    if (!/^\d+$/.test(data.committedAmount)) throw new Error('Enter the total pledge in whole rupees.');
     data.installmentCount = collectionText_(input.installmentCount, 3);
     data.firstDue = collectionText_(input.firstDue, 10);
     collectionSchedule_(data);

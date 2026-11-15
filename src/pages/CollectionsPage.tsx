@@ -10,6 +10,7 @@ import { formatCurrency, todayStr } from '../utils/helpers'
 const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
 const purposes = ['General Donation', 'Land Purchase', 'Temple Construction', 'Seva', 'Other']
 const methods = ['Cash', 'UPI', 'Bank Transfer', 'Cheque']
+const amountPattern = /^[0-9]+$/
 
 function emptyCollection(): CollectionDetails {
   return {
@@ -208,13 +209,26 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    const amount = String(data.amount ?? '').trim()
+    const committedAmount = (data.committedAmount ?? '').trim()
+    if (data.kind !== 'materials' && (!amountPattern.test(amount) || Number(amount) <= 0)) {
+      setError('Enter the amount received in whole rupees, such as 10000.')
+      return
+    }
+    if (data.kind === 'installment' && !data.planID && (!amountPattern.test(committedAmount) || Number(committedAmount) <= 0)) {
+      setError('Enter the total pledge in whole rupees, such as 100000.')
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      await dataService.submitCollection(id, data)
+      await dataService.submitCollection(id, { ...data, amount, committedAmount })
       await onSaved(id)
     } catch (err) {
-      setError(errorText(err))
+      const message = errorText(err)
+      setError(message === 'Complete the donor enrollment details, including the signature name and date.'
+        ? 'The server is running an older version. Deploy the updated Apps Script version and retry.'
+        : message)
     } finally {
       setBusy(false)
     }
@@ -313,7 +327,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
                   </Field>
                   {!data.planID && (
                     <div className="grid gap-3 sm:grid-cols-3">
-                      {field('Total pledged (₹)', 'committedAmount', { required: true, inputMode: 'decimal', pattern: '[0-9]+([.][0-9]{1,2})?' })}
+                      {field('Total pledged (₹)', 'committedAmount', { required: true, inputMode: 'numeric', placeholder: '100000' })}
                       {field('Monthly installments', 'installmentCount', { required: true, type: 'number', min: 2, max: 120, step: 1 })}
                       {field('First installment due', 'firstDue', { required: true, type: 'date' })}
                       <p className="text-sm text-slate-600 sm:col-span-3">
@@ -337,7 +351,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
               ) : (
                 <>
                   {field(data.kind === 'installment' ? 'Received today (₹)' : 'Amount received (₹)', 'amount',
-                    { required: true, inputMode: 'decimal', pattern: '[0-9]+([.][0-9]{1,2})?' })}
+                    { required: true, inputMode: 'numeric', placeholder: '10000' })}
                   <Field label="Payment method" required>
                     <Select value={data.method} onChange={(e) => change('method', e.target.value)}>{methods.map((method) => <option key={method}>{method}</option>)}</Select>
                   </Field>
