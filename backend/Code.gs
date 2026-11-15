@@ -1458,11 +1458,13 @@ function collectionDetails_(body) {
   } else {
     data.phone = normalizePhone_(data.phone);
     data.pan = data.pan.toUpperCase();
-    if (!data.name || !/^\d{10}$/.test(data.phone) || !data.address || !/^\d{12}$/.test(data.aadhaar) ||
-        !/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan) || !/^(Residence|Office)$/.test(data.mailing) ||
-        (data.mailing === 'Office' && !data.office)) {
-      throw new Error('Complete the required donor enrollment details.');
-    }
+    if (!data.name) throw new Error('Enter the donor’s full name.')
+    if (!/^\d{10}$/.test(data.phone)) throw new Error('Enter a 10-digit Indian mobile number.')
+    if (!data.address) throw new Error('Enter the donor’s residential address.')
+    if (!/^\d{12}$/.test(data.aadhaar)) throw new Error('Enter the 12-digit Aadhaar number.')
+    if (!/^[A-Z]{5}\d{4}[A-Z]$/.test(data.pan)) throw new Error('Enter a PAN in the format ABCDE1234F.')
+    if (!/^(Residence|Office)$/.test(data.mailing)) throw new Error('Select Residence or Office as the preferred mailing address.')
+    if (data.mailing === 'Office' && !data.office) throw new Error('Enter the office address or select Residence as the preferred mailing address.')
   }
   if ((data.prayerDate1 && !collectionDate_(data.prayerDate1)) || (data.prayerDate2 && !collectionDate_(data.prayerDate2))) {
     throw new Error('Enter valid dates for the prayer occasions.');
@@ -2273,10 +2275,6 @@ function login_(body) {
   var versioned = stored.indexOf('hmac-v1:') === 0;
   var candidate = versioned ? passwordVerifier_(password, stored.split(':')[1]) : password;
   if (digest_(candidate) !== digest_(stored)) return fail();
-  if (!versioned) {
-    stored = passwordVerifier_(password, randomToken_());
-    sheet_(CONFIG.sheetNames.users).getRange(users.indexOf(user) + 2, HEADERS.users.indexOf('Password') + 1).setValue(stored);
-  }
   cache.remove(failureKey);
   var token = randomToken_();
   cache.put(sessionKey_(token), JSON.stringify({ id: String(user.UserID), credential: digest_(stored) }), 21600);

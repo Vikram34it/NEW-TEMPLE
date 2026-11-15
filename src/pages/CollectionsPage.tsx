@@ -273,7 +273,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
           {enrolling && !donorSelected && (
             <div className="grid gap-3 sm:grid-cols-2">
               {field('Full name', 'name', { required: true, maxLength: 150 })}
-              {field('Mobile number', 'phone', { required: true, type: 'tel', maxLength: 30 })}
+              {field('Mobile number', 'phone', { required: true, type: 'tel', maxLength: 30, placeholder: '10-digit Indian mobile number' })}
               {field('Email', 'email', { type: 'email', maxLength: 254 })}
               {field('Residential address', 'address', { required: true, maxLength: 600 })}
               {field('Office address', 'office', { required: data.mailing === 'Office', maxLength: 600 })}
