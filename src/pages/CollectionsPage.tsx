@@ -42,6 +42,7 @@ const statusColors: Record<CollectionEntry['status'], string> = {
   'Needs correction': 'bg-rose-50 text-rose-900',
   Approved: 'bg-emerald-50 text-emerald-900',
   Rejected: 'bg-slate-100 text-slate-700',
+  Cancelled: 'bg-slate-100 text-slate-700',
 }
 
 function CollectionTable({ rows, admin = false, actions }: {
@@ -57,7 +58,7 @@ function CollectionTable({ rows, admin = false, actions }: {
     { header: 'Purpose / Seva', accessor: ({ details }) => (
       <><div>{details.category || '—'}</div><div className="text-xs text-slate-500">{details.seva}</div></>
     ) },
-    { header: 'Amount / Materials', accessor: ({ details }) => (
+    { header: 'Contribution', accessor: ({ details }) => (
       details.kind === 'materials'
         ? <><div>{details.quantity} {details.unit} {details.item}</div><div className="text-xs text-slate-500">{details.delivery}</div></>
         : <><div className="whitespace-nowrap font-medium tabular-nums">{formatCurrency(Number(details.amount))}</div>
@@ -67,10 +68,10 @@ function CollectionTable({ rows, admin = false, actions }: {
     { header: 'Reference', accessor: ({ details, donationID }) => (
       <><div className="break-all">{details.reference || '—'}</div>{donationID && <div className="text-xs text-slate-500">{donationID}</div>}</>
     ) },
-    { header: 'Installment progress', accessor: ({ installment, details, status }) => installment ? (
+    { header: 'Installments paid / pending', accessor: ({ installment, details, status }) => installment ? (
       <div className="min-w-32 text-xs">
         <div className="font-medium">{installment.paidCount} paid · {installment.pendingCount} pending</div>
-        <div>{formatCurrency(installment.outstanding)} outstanding</div>
+        {!admin && <div>{formatCurrency(installment.outstanding)} outstanding</div>}
         {installment.nextDue && <div className="text-slate-500">Due {formatDate(installment.nextDue)}</div>}
       </div>
     ) : details.kind === 'installment' ? (status === 'Pending review' ? 'Awaiting approval' : 'Unavailable') : '—' },
@@ -83,9 +84,17 @@ function CollectionTable({ rows, admin = false, actions }: {
     ) },
     { header: 'Review note', accessor: ({ note }) => note ? <span className="line-clamp-2 min-w-24 max-w-52 break-words">{note}</span> : '—' },
   ]
-  if (admin) columns.splice(2, 0, { header: 'Collector', accessor: 'collector' })
+  if (admin) {
+    const progressColumn = columns.findIndex((column) => column.header === 'Installments paid / pending')
+    columns.splice(progressColumn + 1, 0, {
+      header: 'Pending amount', accessor: ({ installment }) => installment ? formatCurrency(installment.outstanding) : '—',
+      className: 'whitespace-nowrap tabular-nums',
+    })
+    columns.splice(2, 0, { header: 'Collector', accessor: 'collector' })
+  }
 
-  return <DataTable columns={columns} data={rows} rowKey={(row) => row.id} actions={actions}
+  const visibleColumns = admin ? columns.filter((column) => column.header !== 'Reference' && column.header !== 'Review note') : columns
+  return <DataTable columns={visibleColumns} data={rows} rowKey={(row) => row.id} actions={actions}
     toolbar={<p className="text-xs text-slate-500">{rows.length} {rows.length === 1 ? 'submission' : 'submissions'}</p>} />
 }
 
@@ -196,7 +205,7 @@ function LiveCollectionsPage() {
         {selected && (
           <div className="space-y-4">
             <CollectionRecordDetails row={selected} />
-            <CollectionMessage row={selected} />
+            {selected.status !== 'Cancelled' && <CollectionMessage row={selected} />}
             {selected.status === 'Needs correction' && <Button disabled={formOpen} onClick={() => {
               openCollection(selected)
               setSelected(null)
@@ -426,9 +435,10 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
   )
 }
 
-export function CollectionReview() {
-  const [opened, setOpened] = useState(false)
-  const [view, setView] = useState<'pending' | 'cash' | 'materials' | 'all'>('pending')
+export function CollectionReview({ dashboard = false }: { dashboard?: boolean }) {
+  const [opened, setOpened] = useState(dashboard)
+  const [view, setView] = useState<'pending' | 'approved' | 'cash' | 'materials' | 'cancelled' | 'all'>(dashboard ? 'all' : 'pending')
+  const [query, setQuery] = useState('')
   const [rows, setRows] = useState<CollectionEntry[]>([])
   const [selected, setSelected] = useState<CollectionEntry | null>(null)
   const [error, setError] = useState('')
@@ -447,8 +457,15 @@ export function CollectionReview() {
     }
   }
 
+  useEffect(() => { if (dashboard) void load() }, [dashboard])
+
   const filtered = rows.filter((row) => {
+    const search = query.trim().toLowerCase()
+    if (search && ![row.details.name, row.collector, row.details.reference, row.donationID, row.id]
+      .some((value) => String(value || '').toLowerCase().includes(search))) return false
     if (view === 'pending') return row.status === 'Pending review'
+    if (view === 'approved') return row.status === 'Approved'
+    if (view === 'cancelled') return row.status === 'Cancelled'
     if (view === 'cash') return row.status === 'Approved' && row.details.kind !== 'materials' && row.details.method === 'Cash' && donations.some((donation) => donation.donationID === row.donationID)
     if (view === 'materials') return row.status === 'Approved' && row.details.kind === 'materials'
     return true
@@ -461,18 +478,21 @@ export function CollectionReview() {
 
   return (
     <Card className="space-y-3 p-4">
-      <Button variant="secondary" onClick={() => {
+      {dashboard ? <h2 className="text-lg font-semibold text-slate-900">Collector donations</h2> : <Button variant="secondary" onClick={() => {
         setOpened(!opened)
         if (!opened) void load()
-      }}>{opened ? 'Hide collections' : 'Pending Collections'}</Button>
+      }}>{opened ? 'Hide collections' : 'Pending Collections'}</Button>}
       {opened && (
         <>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <Input aria-label="Search collector donations" placeholder="Search donor, collector or reference" value={query} onChange={(event) => setQuery(event.target.value)} />
             <Select aria-label="Collections view" value={view} onChange={(e) => setView(e.target.value as typeof view)}>
+              <option value="all">All submissions</option>
               <option value="pending">Pending review</option>
+              <option value="approved">Approved</option>
               <option value="cash">Cash handovers</option>
               <option value="materials">Materials register</option>
-              <option value="all">All submissions</option>
+              <option value="cancelled">Cancelled</option>
             </Select>
             <Button variant="secondary" disabled={loading} onClick={load}>Refresh</Button>
           </div>
@@ -485,7 +505,7 @@ export function CollectionReview() {
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           {loading && <p className="text-sm text-slate-500">Loading collections…</p>}
           {!loading && !filtered.length && !error && <p className="text-sm text-slate-500">No collections in this view.</p>}
-          {filtered.length > 0 && <CollectionTable key={view} rows={filtered} admin actions={(row) => (
+          {filtered.length > 0 && <CollectionTable key={view + query.trim()} rows={filtered} admin actions={(row) => (
             <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : 'View'}</Button>
           )} />}
         </>
@@ -597,6 +617,8 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   const [date, setDate] = useState(todayStr)
   const [reference, setReference] = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const choices = accounts.filter((account) => account.type === 'bank' || (handover && account.type === 'cash' && account.accountName !== 'Cash with Collectors'))
@@ -617,7 +639,7 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   return (
     <div className="space-y-4">
       <CollectionRecordDetails row={row} />
-      <CollectionMessage row={row} />
+      {row.status !== 'Cancelled' && <CollectionMessage row={row} />}
       {((pending && !materials && !cash) || handover) && (
         <Field label={handover ? 'Destination account' : 'Bank account'} required>
           <Select value={accountID} onChange={(e) => { setAccountID(e.target.value); setConfirmed(false) }}>
@@ -650,6 +672,26 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
             {handover ? 'Record handover' : 'Mark delivered'}
           </Button>
         </>
+      )}
+      {row.status !== 'Cancelled' && (
+        <div className="space-y-3 border-t border-slate-200 pt-4">
+          {cancelling ? (
+            <>
+              <p className="text-sm text-slate-600">
+                Cancellation keeps the submission for audit. Any linked receipt stops counting toward donations and installments.
+                Imported bank credits and recorded cash handovers are preserved.
+              </p>
+              <Field label="Cancellation reason" required>
+                <Textarea value={cancelReason} maxLength={1000} rows={2} onChange={(event) => setCancelReason(event.target.value)} />
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="danger" disabled={busy || !cancelReason.trim()}
+                  onClick={() => void save(() => dataService.cancelCollection(row.id, cancelReason))}>Confirm cancellation</Button>
+                <Button variant="secondary" disabled={busy} onClick={() => setCancelling(false)}>Go back</Button>
+              </div>
+            </>
+          ) : <Button variant="danger" disabled={busy} onClick={() => setCancelling(true)}>Cancel collection</Button>}
+        </div>
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     </div>

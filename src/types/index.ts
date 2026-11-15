@@ -377,7 +377,7 @@ export interface CollectionEntry {
   id: string
   collector: string
   submittedAt: string
-  status: 'Pending review' | 'Needs correction' | 'Rejected' | 'Approved'
+  status: 'Pending review' | 'Needs correction' | 'Rejected' | 'Approved' | 'Cancelled'
   details: CollectionDetails
   note: string
   donationID: string

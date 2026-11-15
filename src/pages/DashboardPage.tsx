@@ -28,15 +28,50 @@ import { StatCard, Card, CardHeader, Button, Modal, Badge } from '../components/
 import { formatCurrency, monthLabel, formatDateTime } from '../utils/helpers'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ExpenseForm } from '../components/forms/ExpenseForm'
+import { CollectionReview } from './CollectionsPage'
+import { CONFIG } from '../config/apiConfig'
 
 const labelFmt = (label: unknown) => monthLabel(String(label))
 
 const PIE_COLORS = ['#f97316', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#6366f1']
 
 export function DashboardPage() {
-  const { dashboard, can, settings, announcements, events, people, donations, communications } = useApp()
+  const { user, dashboard, can, settings, announcements, events, people, donations, communications } = useApp()
   const [showDonation, setShowDonation] = useState(false)
   const [showExpense, setShowExpense] = useState(false)
+
+  if (user?.role === 'admin' && !CONFIG.useMockData) {
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+            <p className="mt-1 text-sm text-slate-500">{settings.templeName}</p>
+          </div>
+          <div className="flex flex-wrap gap-3 text-sm font-medium text-orange-700">
+            <Link className="hover:underline" to="/donations">Donations</Link>
+            <Link className="hover:underline" to="/installments">Installment plans</Link>
+            <Link className="hover:underline" to="/reports">Financial reports</Link>
+          </div>
+        </div>
+        {dashboard && (
+          <dl className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 sm:grid-cols-3">
+            {[
+              ['Bank balance', dashboard.bankBalance],
+              ['Total donations', dashboard.totalDonations],
+              ['Total expenses', dashboard.totalExpenses],
+            ].map(([label, amount]) => (
+              <div key={label}>
+                <dt className="text-sm text-slate-500">{label}</dt>
+                <dd className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{formatCurrency(Number(amount))}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <CollectionReview dashboard />
+      </div>
+    )
+  }
 
   if (!dashboard) return null
 

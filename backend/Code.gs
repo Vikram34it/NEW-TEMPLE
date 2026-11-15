@@ -274,7 +274,7 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin manager', 'createPerson importDonorProfiles updatePerson deletePerson createVendor updateVendor deleteVendor'],
   ['admin accountant', 'createDonation bulkCreateDonations bulkLinkDonorReceipts linkTransactionsToPerson updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
   ['admin collector', 'submitCollection'],
-  ['admin', 'reviewCollection recordCollectionHandover receiveCollectionMaterials'],
+  ['admin', 'reviewCollection cancelCollection recordCollectionHandover receiveCollectionMaterials'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
@@ -467,6 +467,7 @@ function route_(action, params, body, user) {
     case 'submitCollection': return submitCollection_(body, user);
     case 'reviewCollection': return reviewCollection_(body, user);
     case 'recordCollectionHandover': return recordCollectionHandover_(body, user);
+    case 'cancelCollection': return cancelCollection_(body, user);
     case 'receiveCollectionMaterials': return receiveCollectionMaterials_(body, user);
     case 'getInstallmentPlans': return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans);
     case 'createInstallmentPlan': return createInstallmentPlan_(body);
@@ -1751,6 +1752,32 @@ function postCollectionDonation_(row, data, donor, account, matched, donations) 
   return record;
 }
 
+function cancelCollection_(body, user) {
+  if (user.Role !== 'admin') throw new Error('Permission denied');
+  var row = collectionRows_().find(function (entry) { return String(entry.CollectionID) === body.id; });
+  if (!row) throw new Error('Collection not found.');
+  if (row.Status === 'Cancelled') return { id: row.CollectionID };
+  var reason = collectionText_(body.reason, 1000);
+  if (!reason) throw new Error('Enter a reason for cancellation.');
+  var matches = [];
+  var name = CONFIG.sheetNames.donations;
+  tableData_(name, HEADERS.donations).forEach(function (receipt, index) {
+    if (String(receipt.CollectionID) === body.id) matches.push({ receipt: receipt, row: index + 2 });
+  });
+  if (matches.length > 1 || (row.DonationID && (matches.length !== 1 ||
+      String(matches[0].receipt.DonationID) !== String(row.DonationID)))) {
+    throw new Error('The linked receipt could not be verified. Check the Donations sheet before cancelling.');
+  }
+  if (matches.length) {
+    var deletedColumn = HEADERS.donations.indexOf('Deleted') + 1;
+    sheet_(name).getRange(matches[0].row, deletedColumn).setValue('TRUE');
+    resyncLedger_();
+  }
+  updateCollection_(row, { Status: 'Cancelled', ReviewNote: reason, ReviewedBy: user.Email, ReviewedAt: new Date().toISOString() });
+  audit_('collections', 'Cancel', row.CollectionID, '', reason);
+  return { id: row.CollectionID };
+}
+
 function recordCollectionHandover_(body, user) {
   var row = collectionRows_().find(function (entry) { return entry.CollectionID === body.id; });
   if (!row || row.Status !== 'Approved' || JSON.parse(row.Details).method !== 'Cash') {
@@ -2037,7 +2064,9 @@ function softDeleteRecord_(sheetName, idCol, id) {
   var found = 0;
   for (var r = 0; r < data.length; r++) {
     if (String(data[r][idCol]) === String(id)) {
-      if (sheetName === CONFIG.sheetNames.donations && data[r].CollectionID) throw new Error('Posted collections require reconciliation before cancellation.');
+      if (sheetName === CONFIG.sheetNames.donations && data[r].CollectionID) {
+        throw new Error('An admin can cancel this receipt from Collector donations on the Dashboard.');
+      }
       found++;
       if (deletedCol > 0) {
         sheet.getRange(r + 2, deletedCol).setValue('TRUE');
@@ -2683,7 +2712,8 @@ function reconcileLedger_() {
   ensureColumnCapacity_(txSheet, txHeader.length);
   var txData = tableData_(CONFIG.sheetNames.transactions, txHeader);
 
-  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var donationRows = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var donations = donationRows.filter(notDeleted_);
   var expenses = readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);
   // Cache accounts once instead of re-reading per donation/expense.
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
@@ -2693,7 +2723,7 @@ function reconcileLedger_() {
   // their ledger rows always disappear together.
   var manual = txData.filter(function (t) {
     var ref = String(t.ReferenceID || '').toUpperCase();
-    return !(ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0);
+    return !(ref.indexOf('DON-') === 0 || ref.indexOf('EXP-') === 0 || ref.indexOf('CANCELLED-COL-') === 0);
   });
 
   var personBySource = new Map(txData.map(function (row) { return [String(row.ReferenceID), row.PersonID]; }));
@@ -2706,6 +2736,18 @@ function reconcileLedger_() {
       referenceID: String(d.DonationID),
       description: 'Donation - ' + (d.DonorName || ''),
       createdBy: d.ReceivedBy || 'system',
+    });
+  });
+  var handedOver = new Set(manual.filter(function (t) {
+    return String(t.ReferenceID).indexOf('HANDOVER-COL-') === 0;
+  }).map(function (t) { return String(t.ReferenceID).split(':')[0]; }));
+  donationRows.forEach(function (d) {
+    if (notDeleted_(d) || !d.CollectionID || (!d.BankImportKey && !handedOver.has('HANDOVER-' + d.CollectionID))) return;
+    desired.push({
+      type: 'income', incomeOrExpense: 'income', amount: toNum_(d.Amount), date: String(d.Date),
+      account: ledgerAccount_(d, accounts), referenceID: 'CANCELLED-' + d.CollectionID,
+      description: 'Unallocated credit after cancellation of ' + d.DonationID, createdBy: 'system',
+      accountID: d.AccountID, bankImportKey: d.BankImportKey, bankCategory: 'Unclassified Credit',
     });
   });
   expenses.forEach(function (e) {
@@ -2737,7 +2779,8 @@ function reconcileLedger_() {
     rows.push([
       'TXN-' + nextTxnNum,
       ent.date, ent.type, ent.incomeOrExpense, ent.amount,
-      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy), '', '', '', sheetValue_(personBySource.get(ent.referenceID) || ''),
+      sheetValue_(ent.account), sheetValue_(ent.referenceID), sheetValue_(ent.description), sheetValue_(ent.createdBy),
+      sheetValue_(ent.accountID || ''), sheetValue_(ent.bankImportKey || ''), sheetValue_(ent.bankCategory || ''), sheetValue_(personBySource.get(ent.referenceID) || ''),
     ]);
   });
 

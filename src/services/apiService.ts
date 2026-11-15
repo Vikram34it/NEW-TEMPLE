@@ -447,6 +447,9 @@ export const dataService = {
   recordCollectionHandover(id: string, accountID: string, accountType: string, date: string, reference: string) {
     return apiFetch('recordCollectionHandover', {}, { id, accountID, accountType, date, reference })
   },
+  cancelCollection(id: string, reason: string) {
+    return apiFetch('cancelCollection', {}, { id, reason })
+  },
   receiveCollectionMaterials(id: string, date: string, site: string) {
     return apiFetch('receiveCollectionMaterials', {}, { id, date, site })
   },
