@@ -438,6 +438,9 @@ export const dataService = {
   getCollectionPlans(donorID: string): Promise<CollectionPlan[]> {
     return apiFetch('getCollectionPlans', {}, { donorID })
   },
+  scanCollectionForm(image: string): Promise<Partial<CollectionDetails> & { paperAmount?: string }> {
+    return apiFetch('scanCollectionForm', {}, { image, confirmed: true })
+  },
   submitCollection(id: string, details: CollectionDetails) {
     return apiFetch('submitCollection', {}, { id, details })
   },

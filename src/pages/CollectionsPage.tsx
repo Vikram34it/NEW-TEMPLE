@@ -1,12 +1,13 @@
 import { Plus } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DataTable, type Column } from '../components/DataTable'
+import { CollectionPhotoScan } from '../components/CollectionPhotoScan'
 import { Button, Card, Field, Input, Modal, PageHeader, Select, Textarea } from '../components/ui'
 import { CONFIG } from '../config/apiConfig'
 import { useApp } from '../context/AppContext'
 import { dataService } from '../services/apiService'
 import type { CollectionDetails, CollectionDonor, CollectionEntry, CollectionPlan } from '../types'
-import { formatCurrency, formatDate, formatDateTime, normalizePhone, todayStr } from '../utils/helpers'
+import { formatCurrency, formatDate, formatDateTime, normalizePhone, parseDateInput, todayStr } from '../utils/helpers'
 
 const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
 const purposes = ['General Donation', 'Land Purchase', 'Temple Construction', 'Seva', 'Other']
@@ -234,6 +235,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
   const [results, setResults] = useState<CollectionDonor[]>([])
   const [plans, setPlans] = useState<CollectionPlan[]>([])
   const [enrolling, setEnrolling] = useState(Boolean(entry && !entry.details.donorID))
+  const [scanNotice, setScanNotice] = useState('')
   const [searched, setSearched] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -252,6 +254,30 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
 
   function change(key: keyof CollectionDetails, value: string) {
     setData((previous) => ({ ...previous, [key]: value }))
+  }
+
+  function applyScan({ paperAmount, ...draft }: Awaited<ReturnType<typeof dataService.scanCollectionForm>>) {
+    if (draft.seva && !sevas.includes(draft.seva)) delete draft.seva
+    if (draft.category && !purposes.includes(draft.category)) delete draft.category
+    if (draft.method && !methods.includes(draft.method)) delete draft.method
+    if (draft.kind && !['one-time', 'installment', 'materials'].includes(draft.kind)) delete draft.kind
+    if (draft.mailing && !['Residence', 'Office'].includes(draft.mailing)) delete draft.mailing
+    if (draft.delivery && !['Promised', 'Delivered'].includes(draft.delivery)) delete draft.delivery
+    for (const key of ['date', 'firstDue', 'prayerDate1', 'prayerDate2'] as const) {
+      const date = parseDateInput(draft[key] || '')
+      if (date) draft[key] = date
+      else delete draft[key]
+    }
+    setData((previous) => previous.donorID ? previous : { ...previous, method: '', ...draft })
+    if (draft.phone || draft.name) {
+      setQuery(draft.phone || draft.name || '')
+      setResults([])
+      setSearched(false)
+    }
+    setEnrolling(true)
+    setError('')
+    setScanNotice((paperAmount ? 'Donation amount written on the form: ' + paperAmount + '. ' : '') +
+      'Check the draft against the paper form. Enter Aadhaar and PAN manually for new donors, and verify the contribution type, date, amount and payment method.')
   }
 
   function field(label: string, key: keyof CollectionDetails, options: React.ComponentProps<typeof Input> = {}) {
@@ -307,6 +333,8 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
             <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>Cancel</Button>
           </div>
           {entry?.note && <p className="rounded-lg bg-amber-50 p-3 text-sm">{entry.note}</p>}
+          {!donorSelected && <CollectionPhotoScan disabled={busy} onScan={applyScan} />}
+          {scanNotice && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm">{scanNotice}</p>}
           {donorSelected ? (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
               <span className="font-medium">{data.name}</span>
@@ -417,9 +445,12 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
                   {field(data.kind === 'installment' ? 'Received today (₹)' : 'Amount received (₹)', 'amount',
                     { required: true, inputMode: 'numeric', placeholder: '10000' })}
                   <Field label="Payment method" required>
-                    <Select value={data.method} onChange={(e) => change('method', e.target.value)}>{methods.map((method) => <option key={method}>{method}</option>)}</Select>
+                    <Select required value={data.method} onChange={(e) => change('method', e.target.value)}>
+                      <option value="">Select payment method</option>
+                      {methods.map((method) => <option key={method}>{method}</option>)}
+                    </Select>
                   </Field>
-                  {data.method !== 'Cash' && field('Payment reference', 'reference', { required: true, maxLength: 120 })}
+                  {data.method && data.method !== 'Cash' && field('Payment reference', 'reference', { required: true, maxLength: 120 })}
                 </>
               )}
             </div>

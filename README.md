@@ -167,3 +167,11 @@ npm run build     # typecheck + production build (outputs dist/)
 npm run preview   # preview the production build locally
 npm run lint      # run the linter
 ```
+
+### Collector form photo scanning
+
+Deploy the updated Apps Script and website. In the Apps Script project's **Project Settings → Script properties**, set **COLLECTION_SCAN_GEMINI_KEY** to a Gemini API key from the organization's billing-enabled project. The optional **COLLECTION_SCAN_GEMINI_MODEL** property overrides the default **gemini-2.5-flash** with a Gemini model that supports images and structured output. Keep the key in Script properties.
+
+In **Collections → New collection → Scan a filled paper form**, cover Aadhaar, PAN and signatures before taking a photo. Confirm the photo before sending it to Gemini. The app fills an editable draft from legible values and does not store the photo in Sheets. A handwritten amount in the paper form's Donation Amount box is shown for reference. Enter the actual received amount and confirm the payment details before submitting for approval. For a returning donor, search and select the existing profile to avoid duplicate enrollment.
+
+Test the deployment with a fictional completed form before using it for donor records. For Google's data handling terms, see https://ai.google.dev/gemini-api/terms.
