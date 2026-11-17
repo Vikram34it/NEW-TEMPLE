@@ -1752,6 +1752,7 @@ function collectionDetails_(body) {
     item: 150, unit: 40, delivery: 20, site: 150 };
   var data = {};
   Object.keys(fields).forEach(function (key) { data[key] = collectionText_(input[key], fields[key]); });
+  data.category = 'Temple Construction';
   if (!/^(Yudhisthra|Bhima|Arjuna|Nakula|Sahadeva)$/.test(data.seva) ||
       !/^(General Donation|Land Purchase|Temple Construction|Seva|Other)$/.test(data.category) || !collectionDate_(data.date)) {
     throw new Error('Choose a seva, purpose and valid collection date.');
@@ -1907,6 +1908,17 @@ function collectionAccount_(id, type) {
   return account;
 }
 
+function primaryBankAccount_(accounts) {
+  return accounts.find(function (account) { return /^bank$/i.test(account.Type) && /^ICICI$/i.test(String(account.AccountName).trim()); }) ||
+    accounts.find(function (account) { return /^bank$/i.test(account.Type) && /^Main Bank Account$/i.test(String(account.AccountName).trim()); });
+}
+
+function collectionBankAccount_(id) {
+  var primary = primaryBankAccount_(readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts));
+  if (!primary || (id && String(primary.AccountID) !== id)) throw new Error('Staff collections must be deposited in ICICI.');
+  return collectionAccount_(String(primary.AccountID), 'bank');
+}
+
 function cashWithCollectors_() {
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
   var matching = accounts.filter(function (a) { return a.AccountName === 'Cash with Collectors'; });
@@ -1935,8 +1947,9 @@ function reviewCollection_(body, user) {
         return plan.PlanID === 'PLAN-' + row.CollectionID;
       })))) throw new Error('Approval has started. Retry approval to finish posting.');
   if (decision === 'Approved') {
+    data.category = 'Temple Construction';
     if (data.kind !== 'materials' && !receipt) {
-      var account = data.method === 'Cash' ? cashWithCollectors_() : collectionAccount_(body.accountID, 'bank');
+      var account = data.method === 'Cash' ? cashWithCollectors_() : collectionBankAccount_(body.accountID);
       var matched = [];
       if (data.method !== 'Cash') {
         var ref = data.reference.toLowerCase();
@@ -2067,7 +2080,7 @@ function recordCollectionHandover_(body, user) {
   var ref = collectionText_(body.reference, 120);
   if (!collectionDate_(date) || date < JSON.parse(row.Details).date || !ref) throw new Error('Enter a handover date on or after the collection date and a reference.');
   var source = collectionAccount_(String(receipt.AccountID), 'cash');
-  var target = collectionAccount_(body.accountID, body.accountType === 'bank' ? 'bank' : 'cash');
+  var target = body.accountType === 'bank' ? collectionBankAccount_(body.accountID) : collectionAccount_(body.accountID, 'cash');
   if (source.AccountID === target.AccountID) throw new Error('Choose a different destination account.');
   var transferID = 'HANDOVER-' + row.CollectionID;
   var ledger = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions);
@@ -2151,10 +2164,10 @@ function createInstallmentPlan_(body) {
   var donor = readAll_(CONFIG.sheetNames.people, HEADERS.people).find(function (person) {
     return String(person.PersonID) === body.donorID && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(person.PersonType));
   });
-  var purpose = String(body.purpose || '').trim();
+  var purpose = 'Temple Construction';
   var schedule = body.schedule;
-  if (!donor || !purpose || purpose.length > 200 || !Array.isArray(schedule) || !schedule.length || schedule.length > 120) {
-    throw new Error('Choose a donor, purpose, and 1–120 installments.');
+  if (!donor || !Array.isArray(schedule) || !schedule.length || schedule.length > 120) {
+    throw new Error('Choose a donor and 1-120 installments.');
   }
   var valid = schedule.every(function (item, index) {
     if (!item || typeof item.due !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.due)) return false;
@@ -2734,7 +2747,7 @@ function getSettings_() {
     templeEmail: '',
     receiptPrefix: 'REC',
     currentSequence: 1,
-    defaultBankAccount: 'Main Bank Account',
+    defaultBankAccount: 'ICICI',
     currency: 'INR',
     smsProvider: 'off',
     smsApiKey: '',
@@ -2805,15 +2818,24 @@ function saveFinanceOpeningFunds_(body) {
   return { success: true };
 }
 
+function isConstructionExpenseCategory_(category) {
+  return /^(Temple Construction|Cement|Steel|Sand|Bricks|Labour|Electrical Work|Plumbing|Painting|Marble|Woodwork|Equipment|Transportation)$/i
+    .test(String(category || '').trim());
+}
+
 function financeFundID_(category, purpose, income) {
   var tag = String(category || '').trim();
   var purposeText = String(purpose || '');
   if (isLandPurchase_(tag, purposeText)) return 'land';
   if (/\b(?:book|books|book distribution|book fund|book sales)\b/i.test(tag + ' ' + purposeText)) return 'books';
-  if (isConstructionTagged_(tag, purposeText, '')) return 'construction';
+  if (income ? isConstructionTagged_(tag, purposeText, '') : isConstructionExpenseCategory_(tag)) return 'construction';
   if (/^general donations?$/i.test(tag)) return 'general';
   if (income && /^(Deity Worship|Annadanam \/ Food Distribution|Festivals|Cow Protection|Education|Seva)$/i.test(tag)) return 'other';
   return 'unclassified';
+}
+
+function isConstructionCommitmentReceipt_(row) {
+  return Boolean(row.CollectionID || row.InstallmentPlanID);
 }
 
 function financeFunds_(accounts, transactions, donations, expenses, selectedFund) {
@@ -2826,7 +2848,7 @@ function financeFunds_(accounts, transactions, donations, expenses, selectedFund
   var accountByID = new Map(liquid.map(function (a) { return [String(a.AccountID), a]; }));
   var sources = new Map(donations.concat(expenses).map(function (row) { return [String(row.DonationID || row.ExpenseID), row]; }));
   var handoverFunds = new Map(donations.filter(function (row) { return row.CollectionID; }).map(function (row) {
-    return ['HANDOVER-' + row.CollectionID, financeFundID_(row.Category, row.BankImportKey ? '' : row.Purpose, true)];
+    return ['HANDOVER-' + row.CollectionID, 'construction'];
   }));
   var matchedDeposits = new Map();
   transactions.forEach(function (row) {
@@ -2872,7 +2894,8 @@ function financeFunds_(accounts, transactions, donations, expenses, selectedFund
     var transferFund = handoverFunds.get(reference.split(':')[0]) ||
       (income && matchedDeposits.get(String(row.BankImportKey || '')));
     var category = source ? source.Category : row.BankCategory;
-    var fundID = transferFund || financeFundID_(category, source && !source.BankImportKey ? source.Purpose : '', income);
+    var fundID = transferFund || (source && income && isConstructionCommitmentReceipt_(source)
+      ? 'construction' : financeFundID_(category, source && !source.BankImportKey ? source.Purpose : '', income));
     var transfer = Boolean(transferFund) || row.BankCategory === 'Internal Transfer' || /^HANDOVER-COL-/.test(reference);
     var asset = /^(Fixed Deposit|Fixed Deposit Closure)$/i.test(String(category || '')) ||
       (!source && !income && /\bfd\b|fixed\s*deposit/i.test(String(row.Description || '')));
@@ -2908,11 +2931,6 @@ function buildDashboard_() {
   var accounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
   var payments = readAll_(CONFIG.sheetNames.payments, HEADERS.payments);
   var projects = readAll_(CONFIG.sheetNames.projects, HEADERS.projects);
-
-  var constructionCategories = [
-    'Temple Construction', 'Cement', 'Steel', 'Sand', 'Bricks', 'Labour', 'Electrical Work',
-    'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
-  ];
 
   // Fixed-deposit narrations contain "FD" / "fixed deposit" - these are
   // assets held by the temple, not spends, so they get their own card and are
@@ -2951,14 +2969,14 @@ function buildDashboard_() {
   var totalDonations = sumBy_(donations, 'Amount');
   var totalExpenses = sumBy_(expenseRows, 'Amount');
   var totalConstruction = expenseRows
-    .filter(function (e) { return constructionCategories.indexOf(e.Category) >= 0; })
+    .filter(function (e) { return isConstructionExpenseCategory_(e.Category); })
     .reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
 
   // How much donation money has come in tagged for construction (tracking only
   // - the actual money is held in Cash / Main Bank by payment method).
   var constructionDonations = donations
     .filter(function (d) { var purpose = d.BankImportKey ? '' : d.Purpose;
-      return !isLandPurchase_(d.Category, purpose) && isConstructionTagged_(d.Category, purpose, ''); })
+      return isConstructionCommitmentReceipt_(d) || financeFundID_(d.Category, purpose, true) === 'construction'; })
     .reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
 
   var cash = accounts.filter(function (a) { return String(a.Type).toLowerCase() === 'cash'; });
@@ -2977,13 +2995,31 @@ function buildDashboard_() {
   var thisMonthDonations = donations.filter(function (d) { return String(d.Date).indexOf(thisMonth) === 0; }).reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
   var thisMonthExpenses = expenseRows.filter(function (e) { return String(e.Date).indexOf(thisMonth) === 0; }).reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
   var finance = financeFunds_(accounts, transactions, donations, expenseRecords);
+  var constructionPledged = 0;
+  var constructionOutstanding = 0;
+  var paidByPlan = new Map();
+  donations.forEach(function (row) {
+    var key = String(row.InstallmentPlanID || '') + ':' + String(row.DonorID || '');
+    if (row.InstallmentPlanID) paidByPlan.set(key, (paidByPlan.get(key) || 0) + Math.round(toNum_(row.Amount) * 100));
+  });
+  readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).forEach(function (plan) {
+    var progress;
+    try { progress = collectionPlanProgress_(plan, paidByPlan.get(String(plan.PlanID) + ':' + String(plan.DonorID)) || 0); }
+    catch (err) { return; }
+    if (Number.isFinite(progress.committed) && Number.isFinite(progress.outstanding)) {
+      constructionPledged += Math.round(progress.committed * 100);
+      constructionOutstanding += Math.round(progress.outstanding * 100);
+    }
+  });
 
   return {
     bankCreditCount: credits.length,
     bankDebitCount: debits.length,
     bankCredits: sumBy_(credits, 'Amount'),
     bankDebits: sumBy_(debits, 'Amount'),
-    landDonations: sumBy_(donations.filter(function (d) { return isLandPurchase_(d.Category, d.BankImportKey ? '' : d.Purpose); }), 'Amount'),
+    landDonations: sumBy_(donations.filter(function (d) {
+      return !isConstructionCommitmentReceipt_(d) && isLandPurchase_(d.Category, d.BankImportKey ? '' : d.Purpose);
+    }), 'Amount'),
     landExpenses: sumBy_(expenseRows.filter(function (e) { return isLandPurchase_(e.Category, ''); }), 'Amount'),
     totalDonations: totalDonations,
     totalExpenses: totalExpenses,
@@ -2994,6 +3030,8 @@ function buildDashboard_() {
     cashBalance: sumBy_(cash, 'CurrentBalance'),
     bankBalance: sumBy_(bank, 'CurrentBalance'),
     funds: finance.funds,
+    constructionPledged: constructionPledged / 100,
+    constructionOutstanding: constructionOutstanding / 100,
     openingFundAccounts: finance.openingAccounts,
     pendingPayments: pendingTotal,
     thisMonthDonations: thisMonthDonations,
@@ -3121,11 +3159,15 @@ function accountForPaymentMethod_(method) {
 /* Same logic but uses a pre-read accounts array to avoid re-reading per call. */
 function accountForPaymentMethodCached_(method, accounts) {
   var target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank';
+  if (target === 'bank') {
+    var primary = primaryBankAccount_(accounts);
+    if (primary) return primary.AccountName;
+  }
   for (var i = 0; i < accounts.length; i++) {
     if (String(accounts[i].Type).toLowerCase() === target) return accounts[i].AccountName;
   }
   if (accounts.length) return accounts[0].AccountName;
-  return 'Main Bank Account';
+  return 'ICICI';
 }
 
 /* Rebuild every auto-posted transaction from the live (non-deleted)
@@ -3137,7 +3179,7 @@ function isElectronicReceipt_(method) {
 }
 
 function electronicReceiptAccount_(id, accounts) {
-  var account = accounts.find(function (row) {
+  var account = (!id && primaryBankAccount_(accounts)) || accounts.find(function (row) {
     return /^bank$/i.test(row.Type) && (!id || String(row.AccountID) === String(id));
   });
   if (!account) throw new Error(id ? 'Choose a bank account for this payment.' : 'Add a bank account before recording this payment.');
@@ -3149,8 +3191,8 @@ function ledgerAccount_(record, accounts) {
     return String(a.AccountID) === String(record.AccountID);
   });
   if (record.DonationID && !record.BankImportKey && isElectronicReceipt_(record.PaymentMethod) && (!account || !/^bank$/i.test(account.Type))) {
-    var bank = accounts.find(function (row) { return /^bank$/i.test(row.Type); });
-    return bank ? bank.AccountName : 'Main Bank Account';
+    var bank = primaryBankAccount_(accounts) || accounts.find(function (row) { return /^bank$/i.test(row.Type); });
+    return bank ? bank.AccountName : 'ICICI';
   }
   return account ? account.AccountName : accountForPaymentMethodCached_(record.PaymentMethod, accounts);
 }
@@ -3554,9 +3596,6 @@ function setupSpreadsheet(ss) {
   // 3) Seed default accounts (if empty).
   ensureDefaultAccounts_(ss);
 
-  // 4) Seed example construction projects (if empty).
-  ensureDefaultProjects_(ss);
-
   Logger.log('Setup complete. Configure the Users sheet before deploying the web app.');
 }
 
@@ -3569,7 +3608,7 @@ function ensureSettingsSheet_(ss) {
     ['templeEmail', ''],
     ['receiptPrefix', 'REC'],
     ['currentSequence', '1'],
-    ['defaultBankAccount', 'Main Bank Account'],
+    ['defaultBankAccount', 'ICICI'],
     ['currency', 'INR'],
   ];
   if (!s) {
@@ -3585,16 +3624,54 @@ function ensureDefaultAccounts_(ss) {
   var sh = ensureSheet_(ss, 'accounts');
   if (sh.getLastRow() > 1) return;
   sh.appendRow(['ACC-0001', 'Temple Cash', 50000, 50000, 'cash', 'Petty cash on site']);
-  sh.appendRow(['ACC-0002', 'Main Bank Account', 57771.52, 57771.52, 'bank', 'Opening balance carried forward from the previous financial year']);
-  sh.appendRow(['ACC-0003', 'Construction Account', 0, 0, 'construction', 'Tracks construction funds']);
-  sh.appendRow(['ACC-0004', 'Donation Account', 0, 0, 'donation', 'Tracks donations received']);
+  sh.appendRow(['ACC-0002', 'ICICI', 57771.52, 57771.52, 'bank', 'Opening balance carried forward from the previous financial year']);
+  sh.appendRow(['ACC-0003', 'ICICI Books', 0, 0, 'bank', '']);
 }
 
-function ensureDefaultProjects_(ss) {
-  var sh = ensureSheet_(ss, 'projects');
-  if (sh.getLastRow() > 1) return;
-  sh.appendRow(['PRJ-0001', 'Main Temple Building', 'Sanctum and main structure', '2025-12-01', 5000000, 0, 'not-started', '']);
-  sh.appendRow(['PRJ-0002', 'Prayer Hall', 'Community lecture hall', '2026-01-15', 1500000, 0, 'not-started', '']);
-  sh.appendRow(['PRJ-0003', 'Kitchen', 'Community kitchen', '2026-02-01', 800000, 0, 'not-started', '']);
-  sh.appendRow(['PRJ-0004', 'Guest Rooms', 'Devotee accommodation', '2026-04-01', 1200000, 0, 'not-started', '']);
+// Run once in the Apps Script editor for existing spreadsheets.
+function migrateICICIBankAccounts() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var name = CONFIG.sheetNames.accounts;
+    var accounts = readAll_(name, HEADERS.accounts);
+    var primary = accounts.filter(function (a) { return /^(ICICI|Main Bank Account)$/i.test(String(a.AccountName).trim()); });
+    var books = accounts.filter(function (a) { return /^ICICI Books$/i.test(String(a.AccountName).trim()); });
+    if (primary.length !== 1 || books.length > 1 ||
+        primary.concat(books).some(function (a) { return !/^bank$/i.test(a.Type); })) {
+      throw new Error('Expected one ICICI or Main Bank Account and at most one ICICI Books bank account. Review the Accounts sheet before migrating.');
+    }
+    var oldName = String(primary[0].AccountName);
+    var ledger = sheet_(CONFIG.sheetNames.transactions);
+    var accountColumn = HEADERS.transactions.indexOf('Account') + 1;
+    if (ledger.getLastRow() > 1) {
+      var range = ledger.getRange(2, accountColumn, ledger.getLastRow() - 1, 1);
+      ['Main Bank Account', oldName].forEach(function (label) {
+        if (label !== 'ICICI') range.createTextFinder(label).matchCase(true).matchEntireCell(true).replaceAllWith('ICICI');
+      });
+      if (books.length && books[0].AccountName !== 'ICICI Books') {
+        range.createTextFinder(String(books[0].AccountName)).matchCase(true).matchEntireCell(true).replaceAllWith('ICICI Books');
+      }
+    }
+    var accountSheet = sheet_(name);
+    var titleColumn = HEADERS.accounts.indexOf('AccountName') + 1;
+    accountSheet.getRange(accounts.indexOf(primary[0]) + 2, titleColumn).setValue('ICICI');
+    if (!books.length) {
+      var booksID = nextIdFor_(name, 'AccountID', 'ACC-');
+      accountSheet.appendRow([booksID, 'ICICI Books', 0, 0, 'bank', '']);
+    } else {
+      accountSheet.getRange(accounts.indexOf(books[0]) + 2, titleColumn).setValue('ICICI Books');
+    }
+    var settings = spreadsheet_().getSheetByName('Settings');
+    ensureSettingsSheet_(spreadsheet_());
+    settings = settings || spreadsheet_().getSheetByName('Settings');
+    var bankSetting = settings.getRange(1, 1, settings.getLastRow(), 1)
+      .createTextFinder('defaultBankAccount').matchEntireCell(true).findNext();
+    if (bankSetting) bankSetting.offset(0, 1).setValue('ICICI');
+    else settings.appendRow(['defaultBankAccount', 'ICICI']);
+    SpreadsheetApp.flush();
+    resyncLedger_();
+  } finally {
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+  }
 }

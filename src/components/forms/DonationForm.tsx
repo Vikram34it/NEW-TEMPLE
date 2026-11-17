@@ -80,7 +80,8 @@ export function DonationForm({ initial, onDone }: Props) {
   const [showAddPerson, setShowAddPerson] = useState(false)
   const bankAccounts = accounts.filter((account) => account.type === 'bank')
   const chooseBank = isElectronicPaymentMethod(form.paymentMethod) && !initial?.collectionID && !initial?.bankImportKey
-  const bankID = bankAccounts.find((account) => account.accountID === form.accountID)?.accountID || bankAccounts[0]?.accountID || ''
+  const bankID = bankAccounts.find((account) => account.accountID === form.accountID)?.accountID ||
+    bankAccounts.find((account) => account.accountName === 'ICICI')?.accountID || bankAccounts[0]?.accountID || ''
 
   // Build the donor pick-list from BOTH saved people tagged as Donor AND any
   // donor name seen on past donations, so every past donor can be picked.

@@ -421,11 +421,11 @@ function CollectionForm({ entry, paymentFor, representative, onCancel, onSaved }
 }) {
   const [data, setData] = useState<CollectionDetails>(() => {
     if (paymentFor) {
-      const { donorID, name, planID, seva, category } = paymentFor.details
-      return { ...emptyCollection(), donorID, name, planID, seva, category, kind: 'installment' }
+      const { donorID, name, planID, seva } = paymentFor.details
+      return { ...emptyCollection(), donorID, name, planID, seva, kind: 'installment' }
     }
     if (!entry) return emptyCollection()
-    const details = { ...entry.details }
+    const details = { ...entry.details, category: constructionPurpose }
     if (!details.donorID) { details.aadhaar = ''; details.pan = '' }
     return details
   })
@@ -947,7 +947,9 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   const cash = !materials && data.method === 'Cash'
   const handover = cash && row.status === 'Approved' && !row.handover
   const receive = materials && row.status === 'Approved' && data.delivery === 'Promised'
-  const [accountID, setAccountID] = useState('')
+  const primaryBank = accounts.find((account) => account.type === 'bank' && account.accountName === 'ICICI') ||
+    accounts.find((account) => account.type === 'bank' && account.accountName === 'Main Bank Account')
+  const [accountID, setAccountID] = useState(primaryBank?.accountID || '')
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayStr)
   const [reference, setReference] = useState('')
@@ -956,7 +958,8 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   const [cancelReason, setCancelReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const choices = accounts.filter((account) => account.type === 'bank' || (handover && account.type === 'cash' && account.accountName !== 'Cash with Collectors'))
+  const choices = accounts.filter((account) => account.accountID === primaryBank?.accountID ||
+    (handover && account.type === 'cash' && account.accountName !== 'Cash with Collectors'))
 
   async function save(action: () => Promise<unknown>) {
     setBusy(true)

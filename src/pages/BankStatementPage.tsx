@@ -57,7 +57,7 @@ export function BankStatementPage() {
 
   const bankAccounts = useMemo(() => accounts.filter((account) => account.type === 'bank'), [accounts])
   const defaultAccount = useMemo(
-    () => bankAccounts[0]?.accountID ?? '',
+    () => bankAccounts.find((account) => account.accountName === 'ICICI')?.accountID ?? bankAccounts[0]?.accountID ?? '',
     [bankAccounts],
   )
 

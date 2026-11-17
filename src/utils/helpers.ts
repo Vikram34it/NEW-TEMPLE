@@ -109,9 +109,10 @@ export function isElectronicPaymentMethod(method: string) {
 
 export function accountNameForPaymentMethod(method: string, accounts: Account[]): string {
   const target = String(method || '').trim().toLowerCase() === 'cash' ? 'cash' : 'bank'
-  const acc = accounts.find((a) => a.type === target)
-  if (isElectronicPaymentMethod(method)) return acc?.accountName || 'Main Bank Account'
-  return acc?.accountName || accounts[0]?.accountName || 'Main Bank Account'
+  const acc = (target === 'bank' && accounts.find((a) => a.type === 'bank' && a.accountName === 'ICICI')) ||
+    accounts.find((a) => a.type === target)
+  if (isElectronicPaymentMethod(method)) return acc?.accountName || 'ICICI'
+  return acc?.accountName || accounts[0]?.accountName || 'ICICI'
 }
 
 // Replace {Token} placeholders in a message with values (keys are the token

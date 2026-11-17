@@ -226,6 +226,8 @@ export interface DashboardData {
   funds?: FinanceFund[]
   openingFundAccounts?: FinanceOpeningAccount[]
   approvedStaffReceipts?: number
+  constructionPledged?: number
+  constructionOutstanding?: number
   bankCreditCount: number
   bankDebitCount: number
   bankCredits: number

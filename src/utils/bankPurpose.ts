@@ -11,11 +11,11 @@ export function bankPurpose(direction: 'income' | 'expense', purpose: string, na
   if (direction === 'income' && /\b(?:bank|sb|savings)\s+inter(?:e)?set\b|\b(?:bank|sb|savings)\s+interest\b|\binterest (?:paid|credit|on)\b/.test(bankHint)) return 'Bank Interest'
   if (/\b(?:own account|internal transfer|self transfer|inter.?account)\b/.test(bankHint)) return 'Internal Transfer'
   if (/\b(?:land(?:\s+(?:purchase|fund|registration))?|bhoomi|plot purchase)\b/.test(purpose.toLowerCase())) return 'Land Purchase'
-  if (/\b(?:temple construction|mandir construction|construction fund|construction)\b/.test(purpose.toLowerCase())) return 'Temple Construction'
   if (direction === 'expense') {
     if (/\b(?:bank charges|service charge|sms charge)\b/.test(hint)) return 'Bank Charges'
     return 'Unclassified Expense'
   }
+  if (/\b(?:temple construction|mandir construction|construction fund|construction)\b/.test(purpose.toLowerCase())) return 'Temple Construction'
   if (hasDonor && !purpose.trim()) return 'General Donation'
   return 'Unclassified Credit'
 }

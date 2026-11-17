@@ -5,6 +5,7 @@ import { CONSTRUCTION_EXPENSE_CATEGORIES, OPERATIONS_EXPENSE_CATEGORIES, PAYMENT
 
 interface DonationLike2 {
   expenseID: string
+  accountID?: string
   date: string
   category: string
   description: string
@@ -24,7 +25,7 @@ interface DonationLike2 {
 const empty: DonationLike2 = {
   expenseID: '',
   date: new Date().toISOString().slice(0, 10),
-  category: CONSTRUCTION_EXPENSE_CATEGORIES[0],
+  category: '',
   description: '',
   amount: 0,
   paymentMethod: PAYMENT_METHODS[0],
@@ -47,25 +48,33 @@ interface Props {
 }
 
 export function ExpenseForm({ initial, onDone }: Props) {
-  const { addExpense, updateExpense, user, vendors, projects } = useApp()
+  const { addExpense, updateExpense, user, vendors, accounts } = useApp()
   const [form, setForm] = useState<DonationLike2>({ ...empty, ...initial })
-  const [categoryGroup, setCategoryGroup] = useState<'construction' | 'operations'>('construction')
-  const [customCategory, setCustomCategory] = useState(false)
+  const [categoryGroup, setCategoryGroup] = useState<'construction' | 'operations'>(() =>
+    CONSTRUCTION_EXPENSE_CATEGORIES.some((category) => category === initial?.category) ? 'construction' : 'operations'
+  )
+  const [customCategory, setCustomCategory] = useState(() =>
+    Boolean(initial?.category && !ALL_CATEGORIES.some((category) => category === initial.category))
+  )
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const bankAccounts = accounts.filter((account) => account.type === 'bank')
+  const chooseBank = !initial?.expenseID && form.paymentMethod !== 'Cash'
+  const payingBank = bankAccounts.find((account) => account.accountID === form.accountID)?.accountID ||
+    bankAccounts.find((account) => account.accountName === 'ICICI')?.accountID || bankAccounts[0]?.accountID || ''
 
   const set = <K extends keyof DonationLike2>(key: K, value: DonationLike2[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
-  const categories = customCategory
-    ? ALL_CATEGORIES
-    : categoryGroup === 'construction'
+  const categories = categoryGroup === 'construction'
     ? CONSTRUCTION_EXPENSE_CATEGORIES
     : OPERATIONS_EXPENSE_CATEGORIES
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.description.trim()) return setError('Description is required')
+    if (!form.category.trim()) return setError('Choose an expense category.')
+    if (chooseBank && !payingBank) return setError('Add a bank account before recording a bank payment.')
     if (!form.amount || form.amount <= 0) return setError('Amount must be greater than zero')
     const approvedBy = form.approvedBy || user?.name || ''
     const paidBy = form.paidBy || user?.name || ''
@@ -76,7 +85,7 @@ export function ExpenseForm({ initial, onDone }: Props) {
       if (initial?.expenseID) {
         await updateExpense({ ...form, expenseID: initial.expenseID, approvedBy, paidBy } as never)
       } else {
-        await addExpense({ ...form, approvedBy, paidBy } as never)
+        await addExpense({ ...form, accountID: chooseBank ? payingBank : undefined, approvedBy, paidBy } as never)
       }
       onDone()
     } catch (err) {
@@ -104,27 +113,28 @@ export function ExpenseForm({ initial, onDone }: Props) {
       </Field>
 
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Category" required>
+        <Field label="Category" required hint="Choose a construction category only for expenses related to temple construction.">
           {!customCategory ? (
             <div className="space-y-2">
               <div className="flex gap-1">
                 <button
                   type="button"
-                  onClick={() => { setCategoryGroup('construction'); if (CONSTRUCTION_EXPENSE_CATEGORIES[0]) set('category', CONSTRUCTION_EXPENSE_CATEGORIES[0]) }}
+                  onClick={() => { if (categoryGroup !== 'construction') set('category', ''); setCategoryGroup('construction') }}
                   className={`flex-1 px-2 py-1 text-xs rounded-lg ${categoryGroup === 'construction' ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-600'}`}
                 >
                   Construction
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setCategoryGroup('operations'); set('category', OPERATIONS_EXPENSE_CATEGORIES[0]) }}
+                  onClick={() => { if (categoryGroup !== 'operations') set('category', ''); setCategoryGroup('operations') }}
                   className={`flex-1 px-2 py-1 text-xs rounded-lg ${categoryGroup === 'operations' ? 'bg-orange-600 text-white' : 'bg-slate-100 text-slate-600'}`}
                 >
                   Operations
                 </button>
               </div>
               <div className="flex gap-2">
-                <Select value={form.category} onChange={(e) => set('category', e.target.value)}>
+                <Select required value={form.category} onChange={(e) => set('category', e.target.value)}>
+                  <option value="">Choose a category</option>
                   {categories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </Select>
                 <Button type="button" variant="secondary" size="sm" onClick={() => setCustomCategory(true)}>Custom</Button>
@@ -133,7 +143,10 @@ export function ExpenseForm({ initial, onDone }: Props) {
           ) : (
             <div className="flex gap-2">
               <Input value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="New category" />
-              <Button type="button" variant="secondary" size="sm" onClick={() => setCustomCategory(false)}>Default</Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => {
+                if (!categories.some((category) => category === form.category)) set('category', '')
+                setCustomCategory(false)
+              }}>Default</Button>
             </div>
           )}
         </Field>
@@ -142,6 +155,14 @@ export function ExpenseForm({ initial, onDone }: Props) {
             {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
           </Select>
         </Field>
+        {chooseBank && (
+          <Field label="Paying bank account" required>
+            <Select required value={payingBank} onChange={(event) => set('accountID', event.target.value)}>
+              {!bankAccounts.length && <option value="">Add a bank account first</option>}
+              {bankAccounts.map((account) => <option key={account.accountID} value={account.accountID}>{account.accountName}</option>)}
+            </Select>
+          </Field>
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
@@ -166,19 +187,7 @@ export function ExpenseForm({ initial, onDone }: Props) {
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Project">
-          <Select
-            value={form.projectName}
-            onChange={(e) => {
-              const p = projects.find((x) => x.projectName === e.target.value)
-              set('projectName', e.target.value)
-              set('projectID', p?.projectID || '')
-            }}
-          >
-            <option value="">None</option>
-            {projects.map((p) => <option key={p.projectID} value={p.projectName}>{p.projectName}</option>)}
-          </Select>
-        </Field>
+
         <Field label="Transaction Reference">
           <Input value={form.transactionReference} onChange={(e) => set('transactionReference', e.target.value)} placeholder="Ref no." />
         </Field>

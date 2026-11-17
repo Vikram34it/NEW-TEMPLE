@@ -25,7 +25,6 @@ export function InstallmentsPage() {
   const [plans, setPlans] = useState<InstallmentPlan[]>([])
   const [receipts, setReceipts] = useState<Donation[]>([])
   const [donorID, setDonorID] = useState('')
-  const [purpose, setPurpose] = useState('')
   const [total, setTotal] = useState('')
   const [count, setCount] = useState('1')
   const [firstDue, setFirstDue] = useState('')
@@ -66,14 +65,14 @@ export function InstallmentsPage() {
       <Card className="p-4">
         <form className="grid gap-3 md:grid-cols-3" onSubmit={async (event) => {
           event.preventDefault()
-          const saved = await save(() => dataService.createInstallmentPlan(donorID, purpose, makeSchedule(Math.round(Number(total) * 100), Number(count), firstDue)))
-          if (saved) { setTotal(''); setPurpose('') }
+          const saved = await save(() => dataService.createInstallmentPlan(donorID, 'Temple Construction', makeSchedule(Math.round(Number(total) * 100), Number(count), firstDue)))
+          if (saved) setTotal('')
         }}>
           <Field label="Donor"><Select required value={donorID} onChange={(event) => setDonorID(event.target.value)}>
             <option value="">Choose a donor</option>
             {donors.map((donor) => <option key={donor.personID} value={donor.personID}>{donor.name}{donor.phone ? ' · ' + donor.phone : ''}</option>)}
           </Select></Field>
-          <Field label="Purpose"><Input required maxLength={200} value={purpose} onChange={(event) => setPurpose(event.target.value)} /></Field>
+          <Field label="Purpose"><Input value="Temple Construction" readOnly /></Field>
           <Field label="Committed amount (₹)"><Input required type="number" step="0.01" min="0.01" value={total} onChange={(event) => setTotal(event.target.value)} /></Field>
           <Field label="Monthly installments"><Input required type="number" min="1" max="120" value={count} onChange={(event) => setCount(event.target.value)} /></Field>
           <Field label="First due date"><Input required type="date" value={firstDue} onChange={(event) => setFirstDue(event.target.value)} /></Field>

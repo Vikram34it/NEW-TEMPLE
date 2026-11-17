@@ -46,6 +46,7 @@ export function DashboardPage() {
     const money = (amount: number | undefined) => amount == null ? '—' : formatCurrency(amount)
     const liquidAccounts = accounts.filter((account) => ['bank', 'cash'].includes(account.type?.toLowerCase()))
     const construction = dashboard?.funds?.find((fund) => fund.id === 'construction')
+    const totalIncome = dashboard?.funds?.reduce((total, fund) => total + Math.round(fund.received * 100), 0)
     return (
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -63,13 +64,17 @@ export function DashboardPage() {
           <StatCard label="Money in bank" value={money(dashboard?.bankBalance)} icon={<Landmark size={20} />} color="blue" />
           <StatCard label="Cash outside bank" value={money(dashboard?.cashBalance)} icon={<Wallet size={20} />} color="amber" sub="Includes recorded cash held by collectors" />
           <StatCard label="Total spent" value={money(dashboard?.totalExpenses)} icon={<Receipt size={20} />} color="red" sub="Across all recorded spending" />
+          <StatCard label="Total income" value={money(totalIncome == null ? dashboard?.totalDonations : totalIncome / 100)} icon={<HandCoins size={20} />} color="green" />
           <StatCard label="Approved staff receipts" value={money(dashboard?.approvedStaffReceipts)} icon={<HandCoins size={20} />} color="teal" sub="Already included in bank or cash balances" />
         </div>
         <section className="space-y-3" aria-labelledby="construction-finance">
-          <h2 id="construction-finance" className="text-lg font-semibold text-slate-900">Temple construction</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <h2 id="construction-finance" className="text-lg font-semibold text-slate-900">Temple Construction ledger</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard label="Received for construction" value={money(construction?.received ?? dashboard?.constructionDonations)} icon={<HandCoins size={20} />} color="green" sub="Includes approved staff collections" />
             <StatCard label="Spent on construction" value={money(construction?.spent ?? dashboard?.totalConstructionExpenses)} icon={<HardHat size={20} />} color="orange" sub="Included in total spent" />
+            <StatCard label="Construction funds available" value={money(construction ? construction.bank + construction.cash : undefined)} icon={<Wallet size={20} />} color="blue" />
+            <StatCard label="Construction pledged" value={money(dashboard?.constructionPledged)} icon={<HandCoins size={20} />} color="violet" sub="Approved installment commitments" />
+            <StatCard label="Pledges still to collect" value={money(dashboard?.constructionOutstanding)} icon={<Receipt size={20} />} color="amber" />
           </div>
         </section>
         {dashboard?.funds ? <FinanceFunds /> : !CONFIG.useMockData && dashboard && (
@@ -336,22 +341,7 @@ export function DashboardPage() {
           </div>
         </Card>
 
-        <Card>
-          <CardHeader title="Construction Budget vs Actual" subtitle="Estimated vs spent per project" />
-          <div className="p-4 h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dashboard.constructionBudgets} layout="vertical" margin={{ left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v / 100000}L`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
-                <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-                <Legend />
-                <Bar dataKey="budget" name="Budget" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                <Bar dataKey="actual" name="Actual" fill="#f97316" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+
       </div>
 
       {/* Monthly trend line */}

@@ -41,7 +41,6 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { path: '/people', label: 'People', roles: ['admin', 'accountant', 'manager', 'viewer'] },
       { path: '/vendors', label: 'Vendors', roles: ['admin', 'accountant', 'manager', 'viewer'] },
-      { path: '/projects', label: 'Projects', roles: ['admin', 'accountant', 'manager', 'viewer'] },
     ],
   },
   {

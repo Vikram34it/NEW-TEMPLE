@@ -88,9 +88,9 @@ const basePendingPayments: PendingPayment[] = [
 
 const baseAccounts: Account[] = [
   { accountID: 'ACC-0001', accountName: 'Temple Cash', openingBalance: 50000, currentBalance: 75000, notes: 'Petty cash on site', type: 'cash' },
-  { accountID: 'ACC-0002', accountName: 'Main Bank Account', openingBalance: 57771.52, currentBalance: 57771.52, notes: 'Opening balance carried forward from the previous financial year', type: 'bank' },
-  { accountID: 'ACC-0003', accountName: 'Construction Account', openingBalance: 0, currentBalance: 320000, notes: 'Tracks all construction funds', type: 'construction' },
-  { accountID: 'ACC-0004', accountName: 'Donation Account', openingBalance: 0, currentBalance: 450000, notes: 'Tracks all donations', type: 'donation' },
+  { accountID: 'ACC-0002', accountName: 'ICICI', openingBalance: 57771.52, currentBalance: 57771.52, notes: 'Opening balance carried forward from the previous financial year', type: 'bank' },
+  { accountID: 'ACC-0003', accountName: 'ICICI Books', openingBalance: 0, currentBalance: 0, notes: '', type: 'bank' },
+
 ]
 
 const baseTransactions: Transaction[] = [
@@ -108,7 +108,7 @@ const baseSettings: Settings = {
   templeEmail: 'info@iskcontemple.org',
   receiptPrefix: 'REC',
   currentSequence: 11,
-  defaultBankAccount: 'Main Bank Account',
+  defaultBankAccount: 'ICICI',
   currency: 'INR',
   smsProvider: 'off',
   smsApiKey: '',
@@ -233,7 +233,7 @@ export function buildDashboardData(
     'Plumbing', 'Painting', 'Marble', 'Woodwork', 'Equipment', 'Transportation',
   ]
   const totalConstructionExpenses = spendRows
-    .filter((e) => constructionCategories.includes(e.category))
+    .filter((e) => constructionCategories.some((category) => category.toLowerCase() === String(e.category || '').trim().toLowerCase()))
     .reduce((s, e) => s + e.amount, 0)
 
   // How much donation money has come in tagged for construction (tracking

@@ -16,7 +16,7 @@ const accountIcon = (type: string) => {
 }
 
 export function AccountsPage() {
-  const { accounts, transactions, dashboard, can, addAccount, updateAccount } = useApp()
+  const { accounts, transactions, can, addAccount, updateAccount } = useApp()
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Account | null>(null)
 
@@ -34,20 +34,11 @@ export function AccountsPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {accounts.map((a) => {
+        {accounts.filter((a) => a.type === 'bank' || a.type === 'cash').map((a) => {
           const txs = accountTxs(a.accountName)
-          let received = txs.filter((t) => t.incomeOrExpense === 'income').reduce((s, t) => s + t.amount, 0)
-          let spent = txs.filter((t) => t.incomeOrExpense === 'expense').reduce((s, t) => s + t.amount, 0)
-          let balance = a.currentBalance
-          let isFundTracker = false
-          if (a.type === 'construction' && dashboard) {
-            // Construction money physically stays in Cash/Bank, so this card
-            // reports the fund tracker instead of account transactions.
-            isFundTracker = true
-            received = dashboard.constructionDonations
-            spent = dashboard.totalConstructionExpenses
-            balance = a.openingBalance + received - spent
-          }
+          const received = txs.filter((t) => t.incomeOrExpense === 'income').reduce((s, t) => s + t.amount, 0)
+          const spent = txs.filter((t) => t.incomeOrExpense === 'expense').reduce((s, t) => s + t.amount, 0)
+          const balance = a.currentBalance
           return (
             <Card key={a.accountID} className="p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -55,13 +46,13 @@ export function AccountsPage() {
                 <div>
                   <p className="font-semibold text-slate-700 text-sm">{a.accountName}</p>
                   <p className="text-[11px] text-slate-400 capitalize">
-                    {isFundTracker ? 'construction fund tracker' : `${a.type} account`}
+                    {a.type} account
                   </p>
                 </div>
               </div>
               <p className="text-2xl font-bold text-slate-800">{formatCurrency(balance)}</p>
               <p className="text-[11px] text-slate-400">
-                {isFundTracker ? 'Donations − expenses' : `Opening: ${openingAmount.format(a.openingBalance)}`}
+                Opening: {openingAmount.format(a.openingBalance)}
               </p>
               {can('*') && a.type === 'bank' && <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>Edit opening balance</Button>}
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
@@ -156,8 +147,6 @@ function AccountForm({ onDone, onClose }: { onDone: (a: Omit<Account, 'accountID
         <select className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           <option value="cash">Cash</option>
           <option value="bank">Bank</option>
-          <option value="construction">Construction</option>
-          <option value="donation">Donation</option>
         </select>
       </Field>
       <Field label="Opening Balance (₹)">
