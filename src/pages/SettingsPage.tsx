@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { Save, Plus, Pencil, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader } from '../components/ui'
+import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader, Textarea } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
-import { formatDate } from '../utils/helpers'
+import { formatCurrency, formatDate } from '../utils/helpers'
 import { dataService } from '../services/apiService'
 import type { ResetPreviewResult } from '../services/apiService'
 import type { Role, User } from '../types'
+
+type LoginShare = { recipient: User; password?: string }
 
 export function SettingsPage() {
   const { settings, updateSettings, users, auditLog, deleteUser, can } = useApp()
@@ -18,6 +20,7 @@ export function SettingsPage() {
   const [repairing, setRepairing] = useState(false)
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
+  const [loginShare, setLoginShare] = useState<LoginShare | null>(null)
   const [showReset, setShowReset] = useState(false)
   const [tab, setTab] = useState<'temple' | 'users' | 'audit' | 'messaging'>('temple')
 
@@ -271,6 +274,7 @@ export function SettingsPage() {
           toolbar={can('*') && <Button size="sm" onClick={() => setShowUser(true)}><Plus size={14} /> Add User</Button>}
           actions={(u) => can('*') && (
             <div className="flex gap-1 justify-end">
+              {u.status === 'active' && <Button size="sm" variant="secondary" onClick={() => setLoginShare({ recipient: u })}>Share login</Button>}
               <button onClick={() => setEditUser(u)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
               {u.userID !== 'USR-0001' && (
                 <button onClick={() => { if (confirm(`Delete user ${u.name}?`)) void deleteUser(u.userID).catch(() => {}) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
@@ -315,12 +319,18 @@ export function SettingsPage() {
       )}
 
       <Modal open={showUser} onClose={() => setShowUser(false)} title="Add User">
-        <UserForm onDone={() => setShowUser(false)} />
+        <UserForm onDone={() => setShowUser(false)} onShare={setLoginShare} />
       </Modal>
 
       <Modal open={!!editUser} onClose={() => setEditUser(null)} title="Edit User">
-        {editUser && <UserForm initial={editUser} onDone={() => setEditUser(null)} />}
+        {editUser && <UserForm initial={editUser} onDone={() => setEditUser(null)} onShare={setLoginShare} />}
       </Modal>
+
+      {loginShare && can('*') && (
+        <Modal open onClose={() => setLoginShare(null)} title="Share login on WhatsApp">
+          <LoginShareForm share={loginShare} templeName={settings.templeName} />
+        </Modal>
+      )}
 
       <Modal open={showReset} onClose={() => setShowReset(false)} title="Reset All Transactions">
         <ResetAllForm onDone={() => setShowReset(false)} />
@@ -340,27 +350,99 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
   }
 }
 
-function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => void }) {
+function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
+  const { recipient, password } = share
+  const [phone, setPhone] = useState(recipient.phone || '')
+  const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const isDonor = recipient.role === 'donor'
+  const loginUrl = new URL(window.location.href)
+  loginUrl.search = ''
+  loginUrl.hash = isDonor ? '/login' : '/staff-login'
+  const digits = phone.replace(/\D/g, '')
+  const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
+  const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
+  const message = [
+    `*Hare Krishna, ${recipient.name}!*`,
+    '',
+    `*${templeName} ${isDonor ? 'Donor' : 'Staff'} Portal*`,
+    `*Login link:* ${loginUrl.href}`,
+    isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`,
+    password ? `*Password:* ${password}` : `Use your current password${isDonor ? ' or PIN' : ''}.`,
+    ...(summary ? [
+      '',
+      '*Your contribution summary*',
+      `*Total received:* ${formatCurrency(summary.total)}`,
+      `*Recorded donations:* ${summary.count}`,
+    ] : []),
+    '',
+    isDonor ? 'Sign in to view your donations and receipts. Thank you for your support!' : 'Thank you for your service!',
+  ].join('\n')
+
+  const toggleSummary = async () => {
+    setError('')
+    if (summary) {
+      setSummary(null)
+      return
+    }
+    setLoading(true)
+    try {
+      setSummary(await dataService.getDonorShareSummary(recipient.userID))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load the contribution summary.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Field label="WhatsApp number" hint="Enter a 10-digit Indian number or include the country code for other numbers.">
+        <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+      </Field>
+      {isDonor && (
+        <Button variant="secondary" disabled={loading} onClick={() => void toggleSummary()}>
+          {loading ? 'Loading summary…' : summary ? 'Remove contribution summary' : 'Include contribution summary'}
+        </Button>
+      )}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
+      <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
+      <div className="flex justify-end">
+        <Button disabled={!validPhone} onClick={() => window.open(
+          `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
+        )}>Open WhatsApp draft</Button>
+      </div>
+    </div>
+  )
+}
+
+function UserForm({ initial, onDone, onShare }: { initial?: Partial<User>; onDone: () => void; onShare: (share: LoginShare) => void }) {
   const { addUser, updateUser } = useApp()
   const [form, setForm] = useState<Partial<User>>({ ...{
     name: '', email: '', role: 'viewer', status: 'active', password: '',
-  }, ...initial })
+  }, ...initial, password: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const minimum = form.role === 'admin' || form.role === 'donor' ? 12 : 4
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const shareAfterSave = (e.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'share'
     if (!form.name?.trim() || !form.email?.trim()) return setError('Name and email are required')
     if (!initial?.userID && !form.password) return setError('Password is required for new users')
     setError('')
     setSaving(true)
     try {
+      let recipient: User
       if (initial?.userID) {
         await updateUser(form as User)
+        recipient = form as User
       } else {
-        await addUser(form as Omit<User, 'userID' | 'createdDate'>)
+        recipient = await addUser(form as Omit<User, 'userID' | 'createdDate'>)
       }
+      if (shareAfterSave && recipient.status === 'active') onShare({ recipient, password: form.password })
       onDone()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save user')
@@ -396,9 +478,12 @@ function UserForm({ initial, onDone }: { initial?: Partial<User>; onDone: () => 
           <option value="inactive">Inactive</option>
         </Select>
       </Field>
-      <div className="flex justify-end gap-2 pt-2">
+      <div className="flex flex-wrap justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onDone} type="button">Cancel</Button>
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : initial?.userID ? 'Save Changes' : 'Add User'}</Button>
+        {form.status === 'active' && form.password && (
+          <Button type="submit" value="share" variant="secondary" disabled={saving}>Save and share login</Button>
+        )}
       </div>
     </form>
   )

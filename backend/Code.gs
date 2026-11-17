@@ -262,7 +262,7 @@ var READ_ROLES_ = Object.create(null);
   ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
   ['admin accountant', 'getTransactions transactions getInstallmentPlans'],
   ['admin collector', 'getCollections findCollectionDonors getCollectionPlans scanCollectionForm'],
-  ['admin', 'getAuditLog auditLog'],
+  ['admin', 'getAuditLog auditLog getDonorShareSummary'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
 });
@@ -421,6 +421,17 @@ function route_(action, params, body, user) {
   switch (action) {
     // --- Reads ---
     case 'getUsers': return safeUserRows_(user);
+    case 'getDonorShareSummary': {
+      var donorAccount = readAll_(CONFIG.sheetNames.users, HEADERS.users).find(function (row) {
+        return row.UserID === params.userID && row.Role === 'donor' && row.Status === 'active';
+      });
+      if (!donorAccount) throw new Error('Active donor account not found');
+      var contributions = donationsFor_(donorAccount);
+      return {
+        count: contributions.length,
+        total: contributions.reduce(function (sum, row) { return sum + (Number(row.Amount) || 0); }, 0)
+      };
+    }
     case 'getPeople': return peopleFor_(user);
     case 'getDonations': return donationsFor_(user);
     case 'getExpenses': return readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses);

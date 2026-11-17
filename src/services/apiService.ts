@@ -591,6 +591,9 @@ export const dataService = {
   async getUsers(): Promise<User[]> {
     return (await api.load('users')) as User[]
   },
+  async getDonorShareSummary(userID: string): Promise<{ count: number; total: number }> {
+    return apiFetch('getDonorShareSummary', { userID })
+  },
   async getPeople(): Promise<Person[]> {
     return (await api.load('people')) as Person[]
   },
