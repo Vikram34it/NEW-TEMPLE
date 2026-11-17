@@ -365,9 +365,7 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
 
 function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
   const { recipient, password } = share
-  const [collectorPin, setCollectorPin] = useState(
-    recipient.role === 'collector' && password && /^\d{4,256}$/.test(password) ? password : ''
-  )
+  const [collectorCredential, setCollectorCredential] = useState(password || '')
   const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -381,6 +379,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
   const digits = phone.replace(/\D/g, '')
   const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
   const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
+  const needsCollectorCredential = isCollector && !collectorCredential
   const message = [
     `*Hare Krishna, ${recipient.name}!*`,
     '',
@@ -389,7 +388,9 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     ...(isCollector
       ? [`Select your name *${recipient.name}* from the dropdown list.`]
       : [isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`]),
-    ...(isCollector ? (collectorPin ? [`*PIN:* ${collectorPin}`] : []) : [password
+    ...(isCollector ? (collectorCredential ? [
+      `*${/^\d{4,256}$/.test(collectorCredential) ? 'PIN' : 'Password'}:* ${collectorCredential}`,
+    ] : []) : [password
       ? `*Password:* ${password}`
       : `Use your current password${isDonor ? ' or PIN' : ''}.`]),
     ...(summary ? [
@@ -408,7 +409,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     try {
       const { pin } = await dataService.getCollectorSharePin(recipient.userID)
       if (pin) {
-        setCollectorPin(pin)
+        setCollectorCredential(pin)
       } else {
         setError('A readable PIN is unavailable. Use the separate Reset PIN button, then choose Share login with new PIN.')
       }
@@ -440,9 +441,9 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
       <Field label="WhatsApp number" hint="Enter a 10-digit Indian number or include the country code for other numbers.">
         <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
-      {isCollector && (
-        <Button variant="secondary" disabled={loading} onClick={() => collectorPin ? setCollectorPin('') : void includeCollectorPin()}>
-          {loading ? 'Loading PIN…' : collectorPin ? 'Remove PIN from message' : 'Include current PIN from Sheets'}
+      {needsCollectorCredential && (
+        <Button variant="secondary" disabled={loading} onClick={() => void includeCollectorPin()}>
+          {loading ? 'Loading PIN…' : 'Include current PIN from Sheets'}
         </Button>
       )}
       {isDonor && (
@@ -454,7 +455,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
       <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
-        <Button disabled={!validPhone || loading} onClick={() => window.open(
+        <Button disabled={!validPhone || loading || needsCollectorCredential} onClick={() => window.open(
           `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
         )}>Open WhatsApp draft</Button>
       </div>
