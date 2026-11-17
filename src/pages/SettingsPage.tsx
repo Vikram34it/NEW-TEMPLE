@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Save, Plus, Pencil, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader, Textarea } from '../components/ui'
@@ -332,7 +332,10 @@ export function SettingsPage() {
 
       {loginShare && can('*') && (
         <Modal open onClose={() => setLoginShare(null)} title="Share login on WhatsApp">
-          <LoginShareForm share={loginShare} templeName={settings.templeName} />
+          <LoginShareForm share={loginShare} templeName={settings.templeName} onResetPin={() => {
+            setPinRecipient(loginShare.recipient)
+            setLoginShare(null)
+          }} />
         </Modal>
       )}
 
@@ -363,15 +366,37 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
   }
 }
 
-function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
+function LoginShareForm({ share, templeName, onResetPin }: { share: LoginShare; templeName: string; onResetPin: () => void }) {
   const { recipient, password } = share
-  const [collectorCredential, setCollectorCredential] = useState(password || '')
+  const [pinLookup, setPinLookup] = useState<{ pin: string | null; error?: string } | null>(null)
   const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const isDonor = recipient.role === 'donor'
   const isCollector = recipient.role === 'collector'
+  const collectorID = isCollector && !password ? recipient.userID : null
+  const collectorCredential = password || pinLookup?.pin
+  const loadingPin = !!collectorID && pinLookup === null
+
+  useEffect(() => {
+    if (!collectorID) return
+    let active = true
+    dataService.getCollectorSharePin(collectorID).then(({ pin }) => {
+      if (active) setPinLookup({ pin })
+    }).catch((err: unknown) => {
+      if (active) {
+        const detail = err instanceof Error ? err.message : ''
+        setPinLookup({
+          pin: null,
+          error: /^(Permission denied|Invalid action|Unknown action)/i.test(detail)
+            ? 'The PIN lookup is unavailable. Check that the latest Code.gs is deployed and you are signed in as an admin.'
+            : detail || 'Could not load the collector PIN.',
+        })
+      }
+    })
+    return () => { active = false }
+  }, [collectorID])
   const loginUrl = new URL(window.location.href)
   loginUrl.search = ''
   loginUrl.hash = isDonor ? '/login' : '/staff-login'
@@ -403,23 +428,6 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     isDonor ? 'Sign in to view your donations and receipts. Thank you for your support!' : 'Thank you for your service!',
   ].join('\n')
 
-  const includeCollectorPin = async () => {
-    setError('')
-    setLoading(true)
-    try {
-      const { pin } = await dataService.getCollectorSharePin(recipient.userID)
-      if (pin) {
-        setCollectorCredential(pin)
-      } else {
-        setError('A readable PIN is unavailable. Use the separate Reset PIN button, then choose Share login with new PIN.')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load the collector PIN.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const toggleSummary = async () => {
     setError('')
     if (summary) {
@@ -441,10 +449,14 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
       <Field label="WhatsApp number" hint="Enter a 10-digit Indian number or include the country code for other numbers.">
         <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
-      {needsCollectorCredential && (
-        <Button variant="secondary" disabled={loading} onClick={() => void includeCollectorPin()}>
-          {loading ? 'Loading PIN…' : 'Include current PIN from Sheets'}
-        </Button>
+      {loadingPin && <p role="status" className="text-sm text-slate-600">Loading current PIN from Sheets…</p>}
+      {needsCollectorCredential && pinLookup && (
+        <div className="space-y-2">
+          <p role="alert" className="text-sm text-slate-700">
+            {pinLookup.error || 'The Users sheet has no readable PIN for this collector. Save a new PIN to prepare the message.'}
+          </p>
+          <Button variant="secondary" onClick={onResetPin}>Open Reset PIN</Button>
+        </div>
       )}
       {isDonor && (
         <Button variant="secondary" disabled={loading} onClick={() => void toggleSummary()}>
@@ -452,7 +464,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
         </Button>
       )}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
+      {!needsCollectorCredential && <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>}
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
         <Button disabled={!validPhone || loading || needsCollectorCredential} onClick={() => window.open(
