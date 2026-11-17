@@ -376,6 +376,7 @@ export interface CollectionDetails {
 export interface CollectionEntry {
   id: string
   collector: string
+  collectorID?: string
   submittedAt: string
   status: 'Pending review' | 'Needs correction' | 'Rejected' | 'Approved' | 'Cancelled'
   details: CollectionDetails

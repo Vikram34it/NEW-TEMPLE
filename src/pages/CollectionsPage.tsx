@@ -122,10 +122,11 @@ type CommitmentRow = {
   nextDue: string
   paidCount: number
   pendingCount: number
+  collectors: Set<string>
   entry: CollectionEntry
 }
 
-function collectorOverview(rows: CollectionEntry[]) {
+function collectionOverview(rows: CollectionEntry[]) {
   const history = rows.filter((row) => row.status === 'Approved')
     .sort((first, second) => second.details.date.localeCompare(first.details.date) ||
       second.submittedAt.localeCompare(first.submittedAt))
@@ -135,12 +136,15 @@ function collectorOverview(rows: CollectionEntry[]) {
   for (const entry of history) {
     const { details, installment } = entry
     if (details.kind !== 'materials') collectedPaise += Math.round(Number(details.amount || 0) * 100)
-    if (installment && !commitments.has(installment.id)) {
+    const existing = installment && commitments.get(installment.id)
+    if (existing) existing.collectors.add(entry.collector)
+    if (installment && !existing) {
       commitments.set(installment.id, {
         id: installment.id, donor: details.name, purpose: installment.purpose,
         type: 'Installment commitment', pledged: installment.committed, received: installment.received,
         outstanding: installment.outstanding, nextDue: installment.nextDue,
-        paidCount: installment.paidCount, pendingCount: installment.pendingCount, entry,
+        paidCount: installment.paidCount, pendingCount: installment.pendingCount,
+        collectors: new Set([entry.collector]), entry,
       })
     }
     if (details.kind === 'one-time' || (details.kind === 'materials' && details.delivery === 'Delivered')) {
@@ -149,7 +153,7 @@ function collectorOverview(rows: CollectionEntry[]) {
         id: entry.id, donor: details.name, purpose: materials ? summary(details) : details.category,
         type: materials ? 'Materials delivered' : 'One-time donation',
         pledged: 0, received: Number(details.amount || 0), outstanding: 0, nextDue: '',
-        paidCount: 0, pendingCount: 0, entry,
+        paidCount: 0, pendingCount: 0, collectors: new Set([entry.collector]), entry,
       })
     }
   }
@@ -166,10 +170,62 @@ function collectorOverview(rows: CollectionEntry[]) {
   return { history, pending, completed, totals, collectedPaise }
 }
 
-function CommitmentTable({ rows, pending, actions }: {
+function collectorKey(row: CollectionEntry) {
+  return row.collectorID || row.collector
+}
+
+function collectorBreakdown(rows: CollectionEntry[], overview: ReturnType<typeof collectionOverview>) {
+  const collectors = new Map<string, {
+    id: string; name: string; pledged: number; outstanding: number; completed: number;
+    completedCount: number; received: number; reviewCount: number; activity: number;
+  }>()
+  for (const row of rows) {
+    const id = collectorKey(row)
+    const collector = collectors.get(id) || {
+      id, name: row.collector, pledged: 0, outstanding: 0, completed: 0,
+      completedCount: 0, received: 0, reviewCount: 0, activity: 0,
+    }
+    collector.activity++
+    if (row.status === 'Pending review') collector.reviewCount++
+    if (row.status === 'Approved' && row.details.kind !== 'materials') {
+      collector.received += Math.round(Number(row.details.amount || 0) * 100)
+    }
+    collectors.set(id, collector)
+  }
+  const origins = new Map<string, CollectionEntry>()
+  for (const row of rows) {
+    const planID = row.installment?.id
+    if (!planID) continue
+    const isOrigin = planID === 'PLAN-' + row.id
+    if (!isOrigin && row.status !== 'Approved') continue
+    const current = origins.get(planID)
+    if (isOrigin || !current || (planID !== 'PLAN-' + current.id &&
+        (row.submittedAt < current.submittedAt || (row.submittedAt === current.submittedAt && row.id < current.id)))) {
+      origins.set(planID, row)
+    }
+  }
+  const owners = new Map<string, string>()
+  for (const plan of [...overview.pending, ...overview.completed]) {
+    if (plan.type !== 'Installment commitment') continue
+    const origin = origins.get(plan.id) || plan.entry
+    const id = collectorKey(origin)
+    const collector = collectors.get(id)!
+    owners.set(plan.id, id)
+    collector.pledged += Math.round(plan.pledged * 100)
+    collector.outstanding += Math.round(plan.outstanding * 100)
+    if (plan.outstanding === 0) {
+      collector.completed += Math.round(plan.pledged * 100)
+      collector.completedCount++
+    }
+  }
+  return { owners, collectors: [...collectors.values()].sort((a, b) => b.outstanding - a.outstanding || a.name.localeCompare(b.name)) }
+}
+
+function CommitmentTable({ rows, pending, actions, admin = false }: {
   rows: CommitmentRow[]
   pending: boolean
   actions: (row: CommitmentRow) => ReactNode
+  admin?: boolean
 }) {
   const columns: Column<CommitmentRow>[] = [
     { header: 'Donor', accessor: 'donor', sortable: true },
@@ -179,13 +235,16 @@ function CommitmentTable({ rows, pending, actions }: {
     { header: 'Received', accessor: (row) => row.type === 'Materials delivered' ? '—' : formatCurrency(row.received), sortKey: 'received', sortable: true },
     { header: 'Installments', accessor: (row) => row.type === 'Installment commitment' ? `${row.paidCount} paid / ${row.pendingCount} remaining` : '—' },
   ]
+  if (admin) columns.splice(1, 0, {
+    header: 'Collectors', accessor: (row) => [...row.collectors].filter(Boolean).join(', ') || '—',
+  })
   if (pending) {
     columns.push(
       { header: 'Outstanding', accessor: (row) => formatCurrency(row.outstanding), sortKey: 'outstanding', sortable: true },
       { header: 'Next due', accessor: (row) => row.nextDue ? formatDate(row.nextDue) : '—', sortKey: 'nextDue', sortable: true },
     )
   }
-  return <DataTable columns={columns} data={rows} rowKey={(row) => row.id} actions={actions} searchable
+  return <DataTable columns={columns} data={rows} rowKey={(row) => row.id} actions={actions} searchable={!admin}
     searchPlaceholder="Search by donor, purpose, or type" />
 }
 
@@ -218,7 +277,7 @@ function LiveCollectionsPage() {
 
   useEffect(() => { void load() }, [])
 
-  const overview = collectorOverview(rows)
+  const overview = collectionOverview(rows)
   const views: { id: CollectorView; label: string; count: number }[] = [
     { id: 'pending', label: 'Pending installments', count: overview.pending.length },
     { id: 'completed', label: 'Completed collections', count: overview.completed.length },
@@ -634,8 +693,9 @@ function CollectionForm({ entry, paymentFor, representative, onCancel, onSaved }
 
 export function CollectionReview({ dashboard = false }: { dashboard?: boolean }) {
   const [opened, setOpened] = useState(dashboard)
-  const [view, setView] = useState<'pending' | 'approved' | 'cash' | 'materials' | 'cancelled' | 'all'>(dashboard ? 'all' : 'pending')
+  const [view, setView] = useState<'pending' | 'approved' | 'installments' | 'completed' | 'corrections' | 'cash' | 'materials' | 'cancelled' | 'all'>(dashboard ? 'all' : 'pending')
   const [query, setQuery] = useState('')
+  const [collectorID, setCollectorID] = useState<string | null>(null)
   const [rows, setRows] = useState<CollectionEntry[]>([])
   const [selected, setSelected] = useState<CollectionEntry | null>(null)
   const [error, setError] = useState('')
@@ -656,12 +716,24 @@ export function CollectionReview({ dashboard = false }: { dashboard?: boolean })
 
   useEffect(() => { if (dashboard) void load() }, [dashboard])
 
-  const filtered = rows.filter((row) => {
-    const search = query.trim().toLowerCase()
-    if (search && ![row.details.name, row.collector, row.details.reference, row.donationID, row.id]
-      .some((value) => String(value || '').toLowerCase().includes(search))) return false
+  const overview = collectionOverview(rows)
+  const { collectors, owners } = collectorBreakdown(rows, overview)
+  const activeCollector = collectors.find((collector) => collector.id === collectorID)
+  const search = query.trim().toLowerCase()
+  const matches = (row: CollectionEntry) => !search || [
+    row.details.name, row.collector, row.details.reference, row.donationID, row.id,
+    row.installment?.id, row.installment?.purpose, row.details.category,
+  ].some((value) => String(value || '').toLowerCase().includes(search))
+  const matchingCommitments = new Set(overview.history.filter(matches).flatMap((row) => [row.id, row.installment?.id]))
+  const matchesCommitment = (row: CommitmentRow) => matchingCommitments.has(row.id) &&
+    (!activeCollector || (owners.get(row.id) || collectorKey(row.entry)) === activeCollector.id)
+  const commitmentRows = view === 'installments'
+    ? overview.pending.filter(matchesCommitment)
+    : view === 'completed' ? overview.completed.filter(matchesCommitment) : null
+  const filtered = (view === 'approved' ? overview.history : rows).filter((row) => {
+    if (!matches(row) || (activeCollector && collectorKey(row) !== activeCollector.id)) return false
     if (view === 'pending') return row.status === 'Pending review'
-    if (view === 'approved') return row.status === 'Approved'
+    if (view === 'corrections') return row.status === 'Needs correction'
     if (view === 'cancelled') return row.status === 'Cancelled'
     if (view === 'cash') return row.status === 'Approved' && row.details.kind !== 'materials' && row.details.method === 'Cash' && donations.some((donation) => donation.donationID === row.donationID)
     if (view === 'materials') return row.status === 'Approved' && row.details.kind === 'materials'
@@ -672,6 +744,21 @@ export function CollectionReview({ dashboard = false }: { dashboard?: boolean })
     if (view === 'cash' && !row.handover) cashByCollector.set(row.collector, (cashByCollector.get(row.collector) || 0) + Number(row.details.amount || 0))
   }
   const cashHeld = [...cashByCollector.values()].reduce((sum, amount) => sum + amount, 0)
+  const collectorColumns: Column<(typeof collectors)[number]>[] = [
+    { header: 'Collector', sortKey: 'name', sortable: true, accessor: (collector) => (
+      <button type="button" className="text-left font-semibold text-orange-700 underline" onClick={() => {
+        setCollectorID(collector.id)
+        setQuery('')
+        setView('all')
+      }}>{collector.name || 'Unnamed collector'}</button>
+    ) },
+    { header: 'Pledged', accessor: (collector) => formatCurrency(collector.pledged / 100), sortKey: 'pledged', sortable: true },
+    { header: 'Outstanding', accessor: (collector) => formatCurrency(collector.outstanding / 100), sortKey: 'outstanding', sortable: true },
+    { header: 'Completed pledges', accessor: (collector) => `${formatCurrency(collector.completed / 100)} (${collector.completedCount})`, sortKey: 'completed', sortable: true },
+    { header: 'Approved receipts', accessor: (collector) => formatCurrency(collector.received / 100), sortKey: 'received', sortable: true },
+    { header: 'Pending review', accessor: 'reviewCount', sortable: true },
+    { header: 'Submissions', accessor: 'activity', sortable: true },
+  ]
 
   return (
     <Card className="space-y-3 p-4">
@@ -681,12 +768,49 @@ export function CollectionReview({ dashboard = false }: { dashboard?: boolean })
       }}>{opened ? 'Hide collections' : 'Pending Collections'}</Button>}
       {opened && (
         <>
+          {activeCollector && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold">{activeCollector.name || 'Unnamed collector'}</h3>
+              <Button variant="secondary" onClick={() => {
+                setCollectorID(null)
+                setQuery('')
+              }}>Back to all collectors</Button>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" aria-label={activeCollector ? 'Collector totals' : 'Approved collection totals across collectors'}>
+            {(activeCollector ? [
+              ['Installment pledges', activeCollector.pledged],
+              ['Remaining to collect', activeCollector.outstanding],
+              ['Completed pledges', activeCollector.completed],
+              ['Approved collector payments', activeCollector.received],
+            ] as const : [
+              ['Installment pledges', overview.totals.pledged],
+              ['Paid toward pledges', overview.totals.received],
+              ['Remaining to collect', overview.totals.outstanding],
+              ['Approved collector payments', overview.collectedPaise],
+            ] as const).map(([label, paise]) => (
+              <div key={label} className="rounded-lg bg-slate-50 p-3">
+                <p className="text-sm text-slate-600">{label}</p>
+                <p className="text-lg font-semibold tabular-nums">{loading || error ? '—' : formatCurrency(paise / 100)}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-600">
+            Pledges are credited to the collector who opened the commitment, or to the first collector with an approved submission when the commitment was set up separately. Approved receipts are credited to the collector who recorded each payment.
+          </p>
+          {!activeCollector && collectors.length > 0 && (
+            <DataTable columns={collectorColumns} data={collectors} rowKey={(collector) => collector.id}
+              searchable searchPlaceholder="Find a collector" />
+          )}
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
             <Input aria-label="Search collector donations" placeholder="Search donor, collector or reference" value={query} onChange={(event) => setQuery(event.target.value)} />
             <Select aria-label="Collections view" value={view} onChange={(e) => setView(e.target.value as typeof view)}>
               <option value="all">All submissions</option>
               <option value="pending">Pending review</option>
-              <option value="approved">Approved</option>
+              <option value="corrections">Needs correction</option>
+              <option value="installments">Pending installments</option>
+              <option value="completed">Completed collections</option>
+              <option value="approved">Approved history</option>
               <option value="cash">Cash handovers</option>
               <option value="materials">Materials register</option>
               <option value="cancelled">Cancelled</option>
@@ -701,8 +825,11 @@ export function CollectionReview({ dashboard = false }: { dashboard?: boolean })
           )}
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           {loading && <p className="text-sm text-slate-500">Loading collections…</p>}
-          {!loading && !filtered.length && !error && <p className="text-sm text-slate-500">No collections in this view.</p>}
-          {filtered.length > 0 && <CollectionTable key={view + query.trim()} rows={filtered} admin actions={(row) => (
+          {!loading && !(commitmentRows?.length ?? filtered.length) && !error && <p className="text-sm text-slate-500">No collections in this view.</p>}
+          {!!commitmentRows?.length && <CommitmentTable key={view + search} rows={commitmentRows} pending={view === 'installments'} admin actions={(row) => (
+            <Button variant="secondary" onClick={() => setSelected(row.entry)}>View latest collection</Button>
+          )} />}
+          {!commitmentRows && filtered.length > 0 && <CollectionTable key={view + query.trim()} rows={filtered} admin history={view === 'approved'} actions={(row) => (
             <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : 'View'}</Button>
           )} />}
         </>

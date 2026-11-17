@@ -1601,7 +1601,7 @@ function getCollections_(user, ownOnly) {
     var plan = progress.get(String(details.planID || ''));
     if (details.aadhaar) details.aadhaar = '•••• ' + details.aadhaar.slice(-4);
     if (details.pan) details.pan = '••••••' + details.pan.slice(-4);
-    return { id: row.CollectionID, collector: row.CollectorName, submittedAt: row.SubmittedAt,
+    return { id: row.CollectionID, collector: row.CollectorName, collectorID: String(row.CollectorID || ''), submittedAt: row.SubmittedAt,
       status: row.Status, details: details, note: row.ReviewNote, donationID: row.DonationID,
       contact: { phone: String(contact ? contact.Phone || '' : details.donorID ? '' : details.phone || ''),
         email: String(contact ? contact.Email || '' : details.donorID ? '' : details.email || '') },
