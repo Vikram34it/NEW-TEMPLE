@@ -594,6 +594,9 @@ export const dataService = {
   async getDonorShareSummary(userID: string): Promise<{ count: number; total: number }> {
     return apiFetch('getDonorShareSummary', { userID })
   },
+  async getCollectorSharePin(userID: string): Promise<{ pin: string | null }> {
+    return apiFetch('getCollectorSharePin', { userID })
+  },
   async getPeople(): Promise<Person[]> {
     return (await api.load('people')) as Person[]
   },

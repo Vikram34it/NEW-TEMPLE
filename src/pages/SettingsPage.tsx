@@ -338,7 +338,10 @@ export function SettingsPage() {
 
       {pinRecipient && can('*') && (
         <Modal open onClose={() => setPinRecipient(null)} title={`Reset PIN for ${pinRecipient.name}`}>
-          <CollectorPinForm recipient={pinRecipient} onDone={() => setPinRecipient(null)} />
+          <CollectorPinForm recipient={pinRecipient} onDone={() => setPinRecipient(null)} onShare={(pin) => {
+            setLoginShare({ recipient: pinRecipient, password: pin })
+            setPinRecipient(null)
+          }} />
         </Modal>
       )}
 
@@ -362,6 +365,9 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
 
 function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
   const { recipient, password } = share
+  const [collectorPin, setCollectorPin] = useState(
+    recipient.role === 'collector' && password && /^\d{4,256}$/.test(password) ? password : ''
+  )
   const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -383,7 +389,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     ...(isCollector
       ? [`Select your name *${recipient.name}* from the dropdown list.`]
       : [isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`]),
-    ...(isCollector ? [] : [password
+    ...(isCollector ? (collectorPin ? [`*PIN:* ${collectorPin}`] : []) : [password
       ? `*Password:* ${password}`
       : `Use your current password${isDonor ? ' or PIN' : ''}.`]),
     ...(summary ? [
@@ -395,6 +401,23 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     '',
     isDonor ? 'Sign in to view your donations and receipts. Thank you for your support!' : 'Thank you for your service!',
   ].join('\n')
+
+  const includeCollectorPin = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      const { pin } = await dataService.getCollectorSharePin(recipient.userID)
+      if (pin) {
+        setCollectorPin(pin)
+      } else {
+        setError('A readable PIN is unavailable. Use the separate Reset PIN button, then choose Share login with new PIN.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load the collector PIN.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const toggleSummary = async () => {
     setError('')
@@ -417,6 +440,11 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
       <Field label="WhatsApp number" hint="Enter a 10-digit Indian number or include the country code for other numbers.">
         <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
+      {isCollector && (
+        <Button variant="secondary" disabled={loading} onClick={() => collectorPin ? setCollectorPin('') : void includeCollectorPin()}>
+          {loading ? 'Loading PIN…' : collectorPin ? 'Remove PIN from message' : 'Include current PIN from Sheets'}
+        </Button>
+      )}
       {isDonor && (
         <Button variant="secondary" disabled={loading} onClick={() => void toggleSummary()}>
           {loading ? 'Loading summary…' : summary ? 'Remove contribution summary' : 'Include contribution summary'}
@@ -426,7 +454,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
       <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
-        <Button disabled={!validPhone} onClick={() => window.open(
+        <Button disabled={!validPhone || loading} onClick={() => window.open(
           `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
         )}>Open WhatsApp draft</Button>
       </div>
@@ -434,7 +462,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
   )
 }
 
-function CollectorPinForm({ recipient, onDone }: { recipient: User; onDone: () => void }) {
+function CollectorPinForm({ recipient, onDone, onShare }: { recipient: User; onDone: () => void; onShare: (pin: string) => void }) {
   const { updateUser } = useApp()
   const [newPin, setNewPin] = useState('')
   const [saving, setSaving] = useState(false)
@@ -461,7 +489,7 @@ function CollectorPinForm({ recipient, onDone }: { recipient: User; onDone: () =
     <form className="space-y-4" onSubmit={resetPin}>
       {saved ? (
         <>
-          <p role="status" className="text-sm text-emerald-700">New PIN saved. Give it to {recipient.name} separately.</p>
+          <p role="status" className="text-sm text-emerald-700">New PIN saved.</p>
           <Field label="Saved PIN">
             <Input value={newPin} readOnly onFocus={(event) => event.currentTarget.select()} />
           </Field>
@@ -475,6 +503,9 @@ function CollectorPinForm({ recipient, onDone }: { recipient: User; onDone: () =
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" disabled={saving} onClick={onDone}>{saved ? 'Done' : 'Cancel'}</Button>
+        {saved && recipient.status === 'active' && (
+          <Button type="button" onClick={() => onShare(newPin)}>Share login with new PIN</Button>
+        )}
         {!saved && <Button type="submit" disabled={!validPin || saving}>{saving ? 'Saving PIN…' : 'Save new PIN'}</Button>}
       </div>
     </form>
@@ -506,7 +537,7 @@ function UserForm({ initial, onDone, onShare }: { initial?: Partial<User>; onDon
         recipient = await addUser(form as Omit<User, 'userID' | 'createdDate'>)
       }
       if (shareAfterSave && recipient.status === 'active') {
-        onShare({ recipient, password: recipient.role === 'collector' ? undefined : form.password })
+        onShare({ recipient, password: form.password })
       }
       onDone()
     } catch (err) {

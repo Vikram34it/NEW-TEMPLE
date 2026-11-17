@@ -262,7 +262,7 @@ var READ_ROLES_ = Object.create(null);
   ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
   ['admin accountant', 'getTransactions transactions getInstallmentPlans'],
   ['admin collector', 'getCollections findCollectionDonors getCollectionPlans scanCollectionForm'],
-  ['admin', 'getAuditLog auditLog getDonorShareSummary'],
+  ['admin', 'getAuditLog auditLog getDonorShareSummary getCollectorSharePin'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
 });
@@ -421,6 +421,14 @@ function route_(action, params, body, user) {
   switch (action) {
     // --- Reads ---
     case 'getUsers': return safeUserRows_(user);
+    case 'getCollectorSharePin': {
+      var collectorAccount = readAll_(CONFIG.sheetNames.users, HEADERS.users).find(function (row) {
+        return String(row.UserID) === params.userID && row.Role === 'collector' && row.Status === 'active';
+      });
+      if (!collectorAccount) throw new Error('Active collector account not found');
+      var pin = String(collectorAccount.Password);
+      return { pin: /^\d{4,256}$/.test(pin) ? pin : null };
+    }
     case 'getDonorShareSummary': {
       var donorAccount = readAll_(CONFIG.sheetNames.users, HEADERS.users).find(function (row) {
         return row.UserID === params.userID && row.Role === 'donor' && row.Status === 'active';
