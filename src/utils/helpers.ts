@@ -103,9 +103,14 @@ export function isConstructionTagged(record: { category?: string; purpose?: stri
 // diverted here - physical money always lands in Cash / Main Bank so the bank
 // statement matches reality. Construction totals are tracked separately via
 // isConstructionTagged().
+export function isElectronicPaymentMethod(method: string) {
+  return /^(upi|bank transfer|neft|rtgs|imps|net banking|online transfer|card)$/i.test(String(method || '').trim())
+}
+
 export function accountNameForPaymentMethod(method: string, accounts: Account[]): string {
-  const target = String(method || '').toLowerCase() === 'cash' ? 'cash' : 'bank'
+  const target = String(method || '').trim().toLowerCase() === 'cash' ? 'cash' : 'bank'
   const acc = accounts.find((a) => a.type === target)
+  if (isElectronicPaymentMethod(method)) return acc?.accountName || 'Main Bank Account'
   return acc?.accountName || accounts[0]?.accountName || 'Main Bank Account'
 }
 

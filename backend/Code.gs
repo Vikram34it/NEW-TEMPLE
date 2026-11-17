@@ -1174,6 +1174,17 @@ function createRecord_(sheetName, headers, record, prefix, module, required) {
 
   // Auto-generate donation ID and receipt number for donations
   if (module === 'donation') {
+    if (isElectronicReceipt_(record.PaymentMethod)) {
+      var bankAccounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+      var destination = electronicReceiptAccount_(record.AccountID, bankAccounts);
+      var reference = String(record.TransactionReference || '').trim().toLowerCase();
+      if (reference && readDonations_().some(function (receipt) {
+        return (receipt.BankImportKey || isElectronicReceipt_(receipt.PaymentMethod)) &&
+          String(receipt.TransactionReference || '').trim().toLowerCase() === reference &&
+          ledgerAccount_(receipt, bankAccounts) === destination.AccountName;
+      })) throw new Error('This bank reference already has a donation receipt. Open it in Donations to update its details.');
+      record.AccountID = destination.AccountID;
+    }
     record.DonationID = id;
     var receiptPrefix = String(getSettings_().receiptPrefix || 'REC');
     record.ReceiptNumber = receiptPrefix + '-' + id.split('-')[1] + '-' + pad4_(parseIdNumber(id));
@@ -1256,7 +1267,9 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
 
   var importKeys = Object.create(null);
   var hasBankRows = records.some(function (record) { return record && record.BankImportKey; });
-  var importAccounts = hasBankRows ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
+  var importAccounts = hasBankRows || module === 'donation' && records.some(function (record) {
+    return record && isElectronicReceipt_(record.PaymentMethod);
+  }) ? readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts) : [];
   var importPeople = hasBankRows && module === 'donation' ? readAll_(CONFIG.sheetNames.people, HEADERS.people) : [];
   var collectionCredits = [];
   var collectionDeposits = [];
@@ -1266,7 +1279,8 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
       var existing = name === sheetName ? data : tableData_(name, HEADERS[key]);
       existing.forEach(function (row, index) {
         if (row.BankImportKey) importKeys[row.BankImportKey] = true;
-        if (key === 'donations' && row.CollectionID && row.PaymentMethod !== 'Cash' && notDeleted_(row)) {
+        if (key === 'donations' && notDeleted_(row) &&
+            (isElectronicReceipt_(row.PaymentMethod) || row.CollectionID && row.PaymentMethod !== 'Cash')) {
           collectionCredits.push({ row: row, index: index + 2 });
         }
         if (key === 'transactions' && String(row.ReferenceID).indexOf('HANDOVER-COL-') === 0 && row.IncomeOrExpense === 'income') {
@@ -1287,6 +1301,9 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   for (var i = 0; i < records.length; i++) {
     var record = records[i];
     validateRecord_(record, required || []);
+    if (module === 'donation' && !record.BankImportKey && isElectronicReceipt_(record.PaymentMethod)) {
+      record.AccountID = electronicReceiptAccount_(record.AccountID, importAccounts).AccountID;
+    }
     if (record.BankImportKey) {
       if (Number(record.Amount) <= 0) throw new Error('Bank import amount must be positive');
       if (module === 'transaction') {
@@ -1310,7 +1327,9 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
           { sheetKey: 'transactions', rows: collectionDeposits, ref: function (row) { return String(row.Description).replace(/^Cash handover: /, ''); } }
         ].flatMap(function (source) {
           return source.rows.filter(function (entry) {
-            return String(entry.row.AccountID) === String(record.AccountID) &&
+            return (source.sheetKey === 'donations'
+              ? ledgerAccount_(entry.row, importAccounts) === ledgerAccount_(record, importAccounts)
+              : String(entry.row.AccountID) === String(record.AccountID)) &&
               String(source.ref(entry.row)).trim().toLowerCase() === reference;
           }).map(function (entry) { return { sheetKey: source.sheetKey, entry: entry }; });
         });
@@ -1318,10 +1337,15 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
           var match = matches[0];
           if (matches.length !== 1 || match.entry.row.BankImportKey ||
               Math.round(Number(match.entry.row.Amount) * 100) !== Math.round(Number(record.Amount) * 100)) {
-            throw new Error('Bank reference ' + reference + ' conflicts with a posted collection or cash deposit.');
+            throw new Error('Bank reference ' + reference + ' conflicts with an existing receipt or cash deposit.');
           }
           var matchSheet = sheet_(CONFIG.sheetNames[match.sheetKey]);
           var keyColumn = HEADERS[match.sheetKey].indexOf('BankImportKey') + 1;
+          if (match.sheetKey === 'donations' && !match.entry.row.CollectionID &&
+              String(match.entry.row.AccountID || '') !== String(record.AccountID)) {
+            matchSheet.getRange(match.entry.index, HEADERS.donations.indexOf('AccountID') + 1).setValue(record.AccountID);
+            match.entry.row.AccountID = record.AccountID;
+          }
           matchSheet.getRange(match.entry.index, keyColumn).setValue(record.BankImportKey);
           match.entry.row.BankImportKey = record.BankImportKey;
           importKeys[record.BankImportKey] = true;
@@ -2305,9 +2329,26 @@ function updateRecord_(sheetName, headers, record, idCol, allowInstallmentLink) 
         throw new Error('Unlink this receipt from its installment commitment before changing donors.');
       }
       var values = [];
+      var editableReceipt = sheetName === CONFIG.sheetNames.donations && !data[r].CollectionID && !data[r].BankImportKey;
+      if (editableReceipt && (record.PaymentMethod !== undefined || record.AccountID !== undefined)) {
+        var method = record.PaymentMethod === undefined ? data[r].PaymentMethod : record.PaymentMethod;
+        if (isElectronicReceipt_(method)) {
+          var previousBank = isElectronicReceipt_(data[r].PaymentMethod) ? data[r].AccountID : '';
+          var desiredBank = record.AccountID === undefined ? previousBank : record.AccountID;
+          var paymentAccounts = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts);
+          if (record.AccountID === undefined && !paymentAccounts.some(function (account) {
+            return String(account.AccountID) === String(desiredBank) && /^bank$/i.test(account.Type);
+          })) desiredBank = '';
+          record.AccountID = electronicReceiptAccount_(desiredBank, paymentAccounts).AccountID;
+        } else if (isElectronicReceipt_(data[r].PaymentMethod)) {
+          record.AccountID = '';
+        } else {
+          delete record.AccountID;
+        }
+      }
       for (var c = 0; c < headers.length; c++) {
         var field = headers[c];
-        var val = field === 'CollectionID' || field === 'InstallmentPlanID' && !allowInstallmentLink || field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName)
+        var val = field === 'CollectionID' || field === 'InstallmentPlanID' && !allowInstallmentLink || field === 'BankImportKey' || field === 'AccountID' && isLedgerSheet_(sheetName) && !editableReceipt
           ? undefined : sheetValue_(record[field]);
         values.push(val === undefined ? sheetValue_(data[r][headers[c]]) : val);
       }
@@ -3091,10 +3132,26 @@ function accountForPaymentMethodCached_(method, accounts) {
  * donations and expenses. Any transaction whose ReferenceID points at a
  * DON-/EXP- record is regenerated; ones with no source record (deleted) and
  * duplicates are removed. Manual transactions are left untouched. */
+function isElectronicReceipt_(method) {
+  return /^(upi|bank transfer|neft|rtgs|imps|net banking|online transfer|card)$/i.test(String(method || '').trim());
+}
+
+function electronicReceiptAccount_(id, accounts) {
+  var account = accounts.find(function (row) {
+    return /^bank$/i.test(row.Type) && (!id || String(row.AccountID) === String(id));
+  });
+  if (!account) throw new Error(id ? 'Choose a bank account for this payment.' : 'Add a bank account before recording this payment.');
+  return account;
+}
+
 function ledgerAccount_(record, accounts) {
   var account = record.AccountID && accounts.find(function (a) {
     return String(a.AccountID) === String(record.AccountID);
   });
+  if (record.DonationID && !record.BankImportKey && isElectronicReceipt_(record.PaymentMethod) && (!account || !/^bank$/i.test(account.Type))) {
+    var bank = accounts.find(function (row) { return /^bank$/i.test(row.Type); });
+    return bank ? bank.AccountName : 'Main Bank Account';
+  }
   return account ? account.AccountName : accountForPaymentMethodCached_(record.PaymentMethod, accounts);
 }
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { Button, Field, Input, Modal, Select, Textarea } from '../ui'
 import { DONATION_CATEGORIES, PAYMENT_METHODS } from '../../utils/constants'
+import { isElectronicPaymentMethod } from '../../utils/helpers'
 import type { Person } from '../../types'
 
 interface Props {
@@ -10,6 +11,9 @@ interface Props {
 }
 
 interface DonationLike {
+  accountID?: string
+  collectionID?: string
+  bankImportKey?: string
   donationID: string
   date: string
   donorName: string
@@ -68,12 +72,15 @@ function seed(initial?: Partial<DonationLike>): DonationLike {
 }
 
 export function DonationForm({ initial, onDone }: Props) {
-  const { addDonation, updateDonation, user, people, donations, addPerson } = useApp()
+  const { addDonation, updateDonation, user, people, donations, addPerson, accounts } = useApp()
   const [form, setForm] = useState<DonationLike>(() => seed(initial))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [customCategory, setCustomCategory] = useState(false)
   const [showAddPerson, setShowAddPerson] = useState(false)
+  const bankAccounts = accounts.filter((account) => account.type === 'bank')
+  const chooseBank = isElectronicPaymentMethod(form.paymentMethod) && !initial?.collectionID && !initial?.bankImportKey
+  const bankID = bankAccounts.find((account) => account.accountID === form.accountID)?.accountID || bankAccounts[0]?.accountID || ''
 
   // Build the donor pick-list from BOTH saved people tagged as Donor AND any
   // donor name seen on past donations, so every past donor can be picked.
@@ -136,7 +143,8 @@ export function DonationForm({ initial, onDone }: Props) {
     e.preventDefault()
     if (!form.donorName.trim()) return setError('Donor name is required')
     if (!form.amount || form.amount <= 0) return setError('Donation amount must be greater than zero')
-    const submission = { ...form, receivedBy: form.receivedBy || user?.name || '' }
+    if (chooseBank && !bankID) return setError('Add a bank account before recording this payment.')
+    const submission = { ...form, accountID: chooseBank ? bankID : undefined, receivedBy: form.receivedBy || user?.name || '' }
 
     setError('')
     setSaving(true)
@@ -239,6 +247,14 @@ export function DonationForm({ initial, onDone }: Props) {
             {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
           </Select>
         </Field>
+        {chooseBank && (
+          <Field label="Receiving bank account" required>
+            <Select required value={bankID} onChange={(event) => set('accountID', event.target.value)}>
+              {!bankAccounts.length && <option value="">Add a bank account first</option>}
+              {bankAccounts.map((account) => <option key={account.accountID} value={account.accountID}>{account.accountName}</option>)}
+            </Select>
+          </Field>
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
