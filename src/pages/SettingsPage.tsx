@@ -370,6 +370,7 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
   const digits = phone.replace(/\D/g, '')
   const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
   const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
+  const needsCollectorPin = isCollector && !password
   const message = [
     `*Hare Krishna, ${recipient.name}!*`,
     '',
@@ -434,26 +435,24 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
           {loading ? 'Loading summary…' : summary ? 'Remove contribution summary' : 'Include contribution summary'}
         </Button>
       )}
-      {isCollector && !password && (
-        <details className="rounded-lg border border-slate-200 p-3">
-          <summary className="cursor-pointer text-sm font-medium">Reset PIN for this collector</summary>
-          <form className="mt-3 space-y-3" onSubmit={resetPin}>
-            <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
-              <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
-                required disabled={resetting} value={newPin} onChange={(e) => setNewPin(e.target.value)} />
-            </Field>
-            <Button type="submit" disabled={resetting || !/^\d{6}$/.test(newPin)}>
-              {resetting ? 'Saving PIN…' : 'Reset PIN and update draft'}
-            </Button>
+      {needsCollectorPin && (
+          <form className="space-y-3 rounded-lg border border-slate-200 p-3" onSubmit={resetPin}>
+          <p className="text-sm font-medium">Set a new PIN to include in the WhatsApp message.</p>
+          <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
+            <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
+              required disabled={resetting} value={newPin} onChange={(e) => setNewPin(e.target.value)} />
+          </Field>
+          <Button type="submit" disabled={resetting || !/^\d{6}$/.test(newPin)}>
+            {resetting ? 'Saving PIN…' : 'Save PIN and prepare message'}
+          </Button>
           </form>
-        </details>
       )}
       {pinReset && <p role="status" className="text-sm text-emerald-700">New PIN saved and added to the draft.</p>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
+      {!needsCollectorPin && <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>}
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
-        <Button disabled={!validPhone || resetting} onClick={() => window.open(
+        <Button disabled={!validPhone || resetting || needsCollectorPin} onClick={() => window.open(
           `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
         )}>Open WhatsApp draft</Button>
       </div>
