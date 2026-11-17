@@ -13,6 +13,8 @@ const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
 const constructionPurpose = 'Temple Construction'
 const methods = ['Cash', 'UPI', 'Bank Transfer', 'Cheque']
 const amountPattern = /^[0-9]+$/
+const installmentAmountPattern = /^[0-9]+(?:\.[0-9]{1,2})?$/
+const newCommitment = 'new'
 
 function emptyCollection(): CollectionDetails {
   return {
@@ -107,6 +109,7 @@ function LiveCollectionsPage() {
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<CollectionEntry | null>(null)
+  const [paymentFor, setPaymentFor] = useState<CollectionEntry | null>(null)
   const [filter, setFilter] = useState<CollectionEntry['status'] | 'all'>('all')
   const [selected, setSelected] = useState<CollectionEntry | null>(null)
 
@@ -134,9 +137,10 @@ function LiveCollectionsPage() {
   ] as const
   const filtered = filter === 'all' ? rows : rows.filter((row) => row.status === filter)
 
-  function openCollection(entry: CollectionEntry | null = null) {
+  function openCollection(entry: CollectionEntry | null = null, payment: CollectionEntry | null = null) {
     setMessage('')
     setEditing(entry)
+    setPaymentFor(payment)
     setFormOpen(true)
     requestAnimationFrame(() => document.getElementById('collection-entry')?.scrollIntoView({ block: 'start' }))
   }
@@ -155,7 +159,7 @@ function LiveCollectionsPage() {
 
       {formOpen && (
         <div id="collection-entry" className="mx-auto max-w-3xl scroll-mt-4">
-          <CollectionForm entry={editing} representative={user?.name || ''} onCancel={() => setFormOpen(false)} onSaved={async (id) => {
+          <CollectionForm entry={editing} paymentFor={paymentFor} representative={user?.name || ''} onCancel={() => setFormOpen(false)} onSaved={async (id) => {
             setFormOpen(false)
             setMessage('Submitted for approval · ' + id.slice(0, 12))
             setFilter('all')
@@ -207,6 +211,12 @@ function LiveCollectionsPage() {
           <div className="space-y-4">
             <CollectionRecordDetails row={selected} />
             {selected.status !== 'Cancelled' && <CollectionMessage row={selected} />}
+            {selected.status === 'Approved' && selected.installment && selected.installment.outstanding > 0 && (
+              <Button disabled={formOpen} onClick={() => {
+                openCollection(null, selected)
+                setSelected(null)
+              }}>Record another installment payment</Button>
+            )}
             {selected.status === 'Needs correction' && <Button disabled={formOpen} onClick={() => {
               openCollection(selected)
               setSelected(null)
@@ -218,13 +228,18 @@ function LiveCollectionsPage() {
   )
 }
 
-function CollectionForm({ entry, representative, onCancel, onSaved }: {
+function CollectionForm({ entry, paymentFor, representative, onCancel, onSaved }: {
   entry: CollectionEntry | null
+  paymentFor: CollectionEntry | null
   representative: string
   onCancel: () => void
   onSaved: (id: string) => Promise<void>
 }) {
   const [data, setData] = useState<CollectionDetails>(() => {
+    if (paymentFor) {
+      const { donorID, name, planID, seva, category } = paymentFor.details
+      return { ...emptyCollection(), donorID, name, planID, seva, category, kind: 'installment' }
+    }
     if (!entry) return emptyCollection()
     const details = { ...entry.details }
     if (!details.donorID) { details.aadhaar = ''; details.pan = '' }
@@ -234,20 +249,30 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<CollectionDonor[]>([])
   const [plans, setPlans] = useState<CollectionPlan[]>([])
+  const [loadedDonorID, setLoadedDonorID] = useState('')
   const [enrolling, setEnrolling] = useState(Boolean(entry && !entry.details.donorID))
   const [scanNotice, setScanNotice] = useState('')
   const [searched, setSearched] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const donorSelected = Boolean(data.donorID)
-  const plan = plans.find((item) => item.id === data.planID)
+  const plansReady = !data.donorID || loadedDonorID === data.donorID
+  const donorPlans = data.donorID && plansReady ? plans : []
+  const plan = donorPlans.find((item) => item.id === data.planID)
+  const openPlans = donorPlans.filter((item) => item.outstanding > 0 || item.id === data.planID)
+  const existingCommitment = Boolean(data.planID && data.planID !== newCommitment)
+  const startingCommitment = data.planID === newCommitment || (!data.planID && plansReady && !openPlans.length)
+  const available = plan?.availableToRecord ?? plan?.outstanding ?? 0
+  const amountReceived = Number(data.amount || 0)
 
   useEffect(() => {
-    setPlans([])
     if (!data.donorID) return
     let current = true
     dataService.getCollectionPlans(data.donorID).then((items) => {
-      if (current) setPlans(items)
+      if (current) {
+        setPlans(items)
+        setLoadedDonorID(data.donorID)
+      }
     }).catch((err) => { if (current) setError(errorText(err)) })
     return () => { current = false }
   }, [data.donorID])
@@ -300,18 +325,23 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
     event.preventDefault()
     const amount = String(data.amount ?? '').trim()
     const committedAmount = (data.committedAmount ?? '').trim()
-    if (data.kind !== 'materials' && (!amountPattern.test(amount) || Number(amount) <= 0)) {
-      setError('Enter the amount received in whole rupees, such as 10000.')
+    const againstCommitment = data.kind === 'installment' && existingCommitment
+    if (data.kind !== 'materials' && (!(againstCommitment ? installmentAmountPattern : amountPattern).test(amount) || Number(amount) <= 0)) {
+      setError(againstCommitment ? 'Enter the amount received, with up to two decimal places.' : 'Enter the amount received in whole rupees, such as 10000.')
       return
     }
-    if (data.kind === 'installment' && !data.planID && (!amountPattern.test(committedAmount) || Number(committedAmount) <= 0)) {
+    if (data.kind === 'installment' && (!plansReady || (!startingCommitment && !plan))) {
+      setError('Choose an existing commitment or explicitly start a new one.')
+      return
+    }
+    if (data.kind === 'installment' && startingCommitment && (!amountPattern.test(committedAmount) || Number(committedAmount) <= 0)) {
       setError('Enter the total pledge in whole rupees, such as 100000.')
       return
     }
     setBusy(true)
     setError('')
     try {
-      await dataService.submitCollection(id, { ...data, amount, committedAmount })
+      await dataService.submitCollection(id, { ...data, planID: againstCommitment ? data.planID : '', amount, committedAmount })
       await onSaved(id)
     } catch (err) {
       const message = errorText(err)
@@ -412,23 +442,44 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
               {field('Collection date', 'date', { required: true, type: 'date' })}
               {data.kind === 'installment' && (
                 <div className="space-y-2 sm:col-span-2">
-                  <Field label="Commitment" required>
-                    <Select value={data.planID} onChange={(e) => change('planID', e.target.value)}>
-                      <option value="">Set up a new commitment</option>
-                      {plans.filter((item) => item.outstanding > 0).map((item) => <option key={item.id} value={item.id}>{item.purpose} · {formatCurrency(item.outstanding)} outstanding</option>)}
-                    </Select>
-                  </Field>
-                  {!data.planID && (
+                  {!plansReady && <p className="text-sm text-slate-600">Checking existing commitments for this donor.</p>}
+                  {plansReady && openPlans.length > 0 && (
+                    <Field label="Which commitment is this payment for?" required>
+                      <Select required value={data.planID} onChange={(e) => change('planID', e.target.value)}>
+                        <option value="">Choose an existing commitment</option>
+                        {openPlans.map((item) => <option key={item.id} value={item.id}>
+                          {item.purpose} · {formatCurrency(item.outstanding)} outstanding
+                        </option>)}
+                        <option value={newCommitment}>Start a separate commitment</option>
+                      </Select>
+                    </Field>
+                  )}
+                  {startingCommitment && (
                     <div className="grid gap-3 sm:grid-cols-3">
                       {field('Total pledged (₹)', 'committedAmount', { required: true, inputMode: 'numeric', placeholder: '100000' })}
                       {field('Monthly installments', 'installmentCount', { required: true, type: 'number', min: 2, max: 120, step: 1 })}
                       {field('First installment due', 'firstDue', { required: true, type: 'date' })}
                       <p className="text-sm text-slate-600 sm:col-span-3">
-                        The plan and payment will be recorded after admin approval. Enter only the amount you received today below.
+                        The commitment becomes available for additional payments after the admin approves this submission.
                       </p>
                     </div>
                   )}
-                  {plan && <p className="text-sm text-slate-600">Committed {formatCurrency(plan.committed)} · Next due {plan.nextDue || '—'} · Balance after approval {formatCurrency(Math.max(0, plan.outstanding - Number(data.amount || 0)))}</p>}
+                  {plan && (
+                    <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                      <p>Committed <strong>{formatCurrency(plan.committed)}</strong> · Approved payments <strong>{formatCurrency(plan.received)}</strong></p>
+                      <p>{plan.paidCount} installments fully paid · {plan.pendingCount} remaining
+                        {plan.nextDue && <> · Next scheduled amount {formatCurrency(plan.nextAmount)} due {formatDate(plan.nextDue)}</>}
+                      </p>
+                      <p>Outstanding <strong>{formatCurrency(plan.outstanding)}</strong>
+                        {!!plan.awaitingApproval && <> · Awaiting approval {formatCurrency(plan.awaitingApproval)}</>}
+                      </p>
+                      <p>Enter what you received on the collection date. Partial payments and payments ahead of schedule are applied to the earliest unpaid installments.</p>
+                      {amountReceived > 0 && amountReceived <= available && (
+                        <p>Projected balance after pending payments and this payment are approved <strong>{formatCurrency(available - amountReceived)}</strong></p>
+                      )}
+                      {amountReceived > available && <p className="text-amber-800">Available after pending submissions {formatCurrency(available)}. If this payment already has a linked bank receipt, the admin can reconcile it during approval.</p>}
+                    </div>
+                  )}
                 </div>
               )}
               {data.kind === 'materials' ? (
@@ -443,8 +494,8 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
                 </>
               ) : (
                 <>
-                  {field(data.kind === 'installment' ? 'Received today (₹)' : 'Amount received (₹)', 'amount',
-                    { required: true, inputMode: 'numeric', placeholder: '10000' })}
+                  {field('Amount received (₹)', 'amount',
+                    { required: true, inputMode: data.kind === 'installment' && existingCommitment ? 'decimal' : 'numeric', placeholder: '10000' })}
                   <Field label="Payment method" required>
                     <Select required value={data.method} onChange={(e) => change('method', e.target.value)}>
                       <option value="">Select payment method</option>

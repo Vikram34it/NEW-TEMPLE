@@ -402,4 +402,6 @@ export interface CollectionPlan {
   paidCount: number
   pendingCount: number
   nextAmount: number
+  awaitingApproval?: number
+  availableToRecord?: number
 }

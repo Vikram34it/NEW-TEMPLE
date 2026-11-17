@@ -1396,6 +1396,94 @@ function collectionRows_() {
   return readAll_(CONFIG.sheetNames.collections, HEADERS.collections);
 }
 
+var DONOR_FORM_COLUMNS_ = [
+  ['Collection ID', 'CollectionID', 'row'], ['Donor name', 'name'], ['Mobile number', 'phone'],
+  ['Email address', 'email'], ['Collection date', 'date'], ['Purpose of donation', 'category'],
+  ['Seva', 'seva'], ['Contribution type', 'kind'], ['Amount received (₹)', 'amount'],
+  ['Payment method', 'method'], ['Payment reference', 'reference'],
+  ['Collector', 'CollectorName', 'row'], ['Review status', 'Status', 'row'],
+  ['Residential address', 'address'], ['Office address', 'office'], ['Mailing preference', 'mailing'],
+  ['PAN (masked)', 'pan'], ['Aadhaar (masked)', 'aadhaar'], ['Gotram', 'gotram'],
+  ['Prayer occasion 1', 'prayer1'], ['Prayer date 1', 'prayerDate1'],
+  ['Prayer occasion 2', 'prayer2'], ['Prayer date 2', 'prayerDate2'], ['Referrals', 'referrals'],
+  ['Commitment ID', 'planID'], ['Total pledged (₹)', 'committedAmount'],
+  ['Monthly installments', 'installmentCount'], ['First installment due', 'firstDue'],
+  ['Material or item', 'item'], ['Quantity', 'quantity'], ['Unit', 'unit'],
+  ['Delivery status', 'delivery'], ['Delivery site', 'site'], ['Actual delivery date', 'deliveredDate'],
+  ['Donor ID', 'donorID'], ['Submitted at', 'SubmittedAt', 'row'],
+  ['Admin review note', 'ReviewNote', 'row'], ['Donation ID', 'DonationID', 'row'],
+];
+
+// Run from the Apps Script editor to install or refresh the spreadsheet view.
+function setupDonorFormDetails() {
+  var ss = spreadsheet_();
+  var collections = sheet_(CONFIG.sheetNames.collections);
+  sheet_(CONFIG.sheetNames.people);
+  var name = 'Donor Form Details';
+  var report = ss.getSheetByName(name) || ss.insertSheet(name);
+  var headers = DONOR_FORM_COLUMNS_.map(function (column) { return column[0]; });
+  if (report.getLastRow() &&
+      (report.getRange('A1').getValue() !== headers[0] ||
+       report.getRange('A2').getFormula().indexOf('=DONOR_FORM_ROWS(') !== 0)) {
+    throw new Error('A sheet named Donor Form Details already contains other data.');
+  }
+  ensureColumnCapacity_(report, headers.length);
+  ensureRowCapacity_(report, collections.getMaxRows());
+  report.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#9a3412').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+  report.setFrozenRows(1);
+  report.setFrozenColumns(2);
+  report.setColumnWidths(1, headers.length, 145);
+  report.setColumnWidth(1, 320);
+  report.setColumnWidth(2, 220);
+  report.getRange('A1').setNote('One row per submitted collection. This view updates from Collections and People. Make corrections in the app.');
+  report.getRange('A2').setFormula("=DONOR_FORM_ROWS('" + CONFIG.sheetNames.collections + "'!A2:K,'" +
+    CONFIG.sheetNames.people + "'!A2:E)");
+  ss.setActiveSheet(report);
+}
+
+/**
+ * Displays collection submissions as columns. Source ranges trigger recalculation.
+ * @customfunction
+ */
+function DONOR_FORM_ROWS(collections, people) {
+  var contacts = new Map();
+  people.forEach(function (row) {
+    if (row[0]) contacts.set(String(row[0]), row);
+  });
+  var submissions = collections.filter(function (row) { return row[0]; });
+  if (!submissions.length) return '';
+  return submissions.map(function (cells) {
+    var row = {};
+    HEADERS.collections.forEach(function (key, index) { row[key] = cells[index]; });
+    var details;
+    try {
+      details = JSON.parse(row.Details) || {};
+      if (typeof details !== 'object' || Array.isArray(details)) throw new Error('Invalid form details.');
+    } catch (err) {
+      details = {};
+      row.ReviewNote = 'Unable to read stored form details.';
+    }
+    var contact = contacts.get(String(details.donorID || ''));
+    if (contact) {
+      details.name = details.name || contact[1];
+      details.phone = details.phone || contact[2];
+      details.email = details.email || contact[3];
+      details.address = details.address || contact[4];
+    }
+    ['pan', 'aadhaar'].forEach(function (key) {
+      var value = String(details[key] || '');
+      details[key] = value ? '•••• ' + value.slice(-4) : '';
+    });
+    var contributionTypes = { 'one-time': 'One-time payment', installment: 'Installment payment', materials: 'Construction materials' };
+    details.kind = contributionTypes[details.kind] || '';
+    return DONOR_FORM_COLUMNS_.map(function (column) {
+      var value = (column[2] === 'row' ? row : details)[column[1]];
+      return value == null ? '' : value;
+    });
+  });
+}
+
 function collectionPerson_(id) {
   return readAll_(CONFIG.sheetNames.people, HEADERS.people).find(function (person) {
     return String(person.PersonID) === id && String(person.Status).toLowerCase() === 'active' &&
@@ -1415,9 +1503,20 @@ function findCollectionDonors_(body) {
   });
 }
 
-function getCollectionPlans_(body) {
+function getCollectionPlans_(body, excludeCollectionID) {
   if (!collectionPerson_(body.donorID)) return [];
   var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var posted = new Set(donations.map(function (donation) { return String(donation.CollectionID || ''); }));
+  var reserved = new Map();
+  collectionRows_().forEach(function (row) {
+    if (row.Status !== 'Pending review' || row.CollectionID === excludeCollectionID || posted.has(String(row.CollectionID))) return;
+    var details;
+    try { details = JSON.parse(row.Details); } catch (err) { return; }
+    if (!details || details.kind !== 'installment' || details.donorID !== body.donorID || !details.planID ||
+        linkedCollectionBankReceipt_(details, donations)) return;
+    var amount = Math.round(Number(details.amount) * 100);
+    if (Number.isFinite(amount) && amount > 0) reserved.set(details.planID, (reserved.get(details.planID) || 0) + amount);
+  });
   return readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans).filter(function (plan) {
     return String(plan.DonorID) === body.donorID;
   }).map(function (plan) {
@@ -1425,7 +1524,21 @@ function getCollectionPlans_(body) {
       return donation.InstallmentPlanID === plan.PlanID && String(donation.DonorID) === String(plan.DonorID)
         ? sum + Math.round(Number(donation.Amount) * 100) : sum;
     }, 0);
-    return collectionPlanProgress_(plan, paid);
+    var progress = collectionPlanProgress_(plan, paid);
+    progress.awaitingApproval = (reserved.get(plan.PlanID) || 0) / 100;
+    progress.availableToRecord = Math.max(0, Math.round(progress.outstanding * 100) - (reserved.get(plan.PlanID) || 0)) / 100;
+    return progress;
+  });
+}
+
+function linkedCollectionBankReceipt_(details, donations) {
+  if (!details.reference || details.method === 'Cash') return false;
+  var reference = details.reference.toLowerCase();
+  return donations.some(function (donation) {
+    return !donation.CollectionID && donation.BankImportKey && donation.InstallmentPlanID === details.planID &&
+      String(donation.DonorID) === details.donorID &&
+      String(donation.TransactionReference).trim().toLowerCase() === reference &&
+      Math.round(Number(donation.Amount) * 100) === Math.round(details.amount * 100);
   });
 }
 
@@ -1648,15 +1761,19 @@ function collectionDetails_(body) {
   if (data.method === 'Cash') data.reference = '';
   var amount = String(input.amount || '').trim();
   data.amount = Number(amount);
-  if (!/^\d+$/.test(amount) || data.amount <= 0 || data.amount > 1000000000) {
+  var installmentAmount = data.kind === 'installment' && data.planID;
+  if (!(installmentAmount ? /^\d+(?:\.\d{1,2})?$/ : /^\d+$/).test(amount) || data.amount <= 0 || data.amount > 1000000000) {
+    if (installmentAmount) throw new Error('Enter a positive installment amount with up to two decimal places.');
     throw new Error('Enter a positive whole-rupee amount up to ₹1,00,00,00,000.');
   }
   if (!/^(one-time|installment)$/.test(data.kind) || !/^(Cash|UPI|Bank Transfer|Cheque)$/.test(data.method) ||
       (data.method !== 'Cash' && !data.reference)) throw new Error('Enter a valid amount, payment method and reference.');
   if (data.kind === 'installment' && data.planID) {
-    var plan = getCollectionPlans_({ donorID: data.donorID }).find(function (row) { return row.id === data.planID; });
-    if (!plan || Math.round(data.amount * 100) > Math.round(plan.outstanding * 100)) {
-      throw new Error('Choose an existing commitment and enter an amount within its outstanding balance.');
+    var plan = getCollectionPlans_({ donorID: data.donorID }, body.id).find(function (row) { return row.id === data.planID; });
+    if (!plan) throw new Error('Choose an approved commitment for this donor.');
+    if (Math.round(data.amount * 100) > Math.round(plan.availableToRecord * 100) &&
+        !linkedCollectionBankReceipt_(data, readAll_(CONFIG.sheetNames.donations, HEADERS.donations))) {
+      throw new Error('This payment exceeds the balance available after pending submissions. Refresh the commitment or ask the admin to review earlier payments.');
     }
   } else if (data.kind === 'installment') {
     data.committedAmount = collectionText_(input.committedAmount, 16);
@@ -1718,10 +1835,27 @@ function updateCollection_(row, changes) {
 function submitCollection_(body, user) {
   var id = collectionText_(body.id, 45);
   if (!/^COL-[a-f0-9-]{36}$/i.test(id)) throw new Error('Invalid collection reference.');
-  var existing = collectionRows_().find(function (row) { return row.CollectionID === id; });
+  var rows = collectionRows_();
+  var existing = rows.find(function (row) { return row.CollectionID === id; });
   if (existing && String(existing.CollectorID) !== String(user.UserID)) throw new Error('Collection not found.');
   if (existing && existing.Status !== 'Needs correction') return { id: id };
   var details = collectionDetails_(body);
+  if (details.kind === 'installment') {
+    rows.forEach(function (row) {
+      if (row.CollectionID === id || row.Status !== 'Pending review') return;
+      var pending;
+      try { pending = JSON.parse(row.Details); } catch (err) { return; }
+      if (!pending) return;
+      if (details.reference && pending.reference && details.reference.toLowerCase() === String(pending.reference).toLowerCase()) {
+        throw new Error('This payment reference is already awaiting review.');
+      }
+      var sameDonor = details.donorID ? details.donorID === pending.donorID : details.phone && details.phone === pending.phone;
+      if (!details.planID && pending.kind === 'installment' && !pending.planID && sameDonor &&
+          pending.category === details.category && pending.seva === details.seva) {
+        throw new Error('A matching new commitment is already awaiting approval. Ask the admin to approve it, then record this payment against that commitment.');
+      }
+    });
+  }
   if (existing) {
     updateCollection_(existing, { Details: JSON.stringify(details), Status: 'Pending review', ReviewNote: '',
       ReviewedBy: '', ReviewedAt: '', SubmittedAt: new Date().toISOString() });
@@ -2008,7 +2142,8 @@ function createInstallmentPlan_(body) {
 function linkInstallmentPayment_(body) {
   var plan = readAll_(CONFIG.sheetNames.installmentPlans, HEADERS.installmentPlans)
     .find(function (row) { return String(row.PlanID) === body.planID; });
-  var donation = readAll_(CONFIG.sheetNames.donations, HEADERS.donations)
+  var donations = readAll_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var donation = donations
     .find(function (row) { return String(row.DonationID) === body.donationID; });
   if (!plan || !donation) throw new Error('Plan or active donation not found.');
   if (body.unlink === true) {
@@ -2017,6 +2152,15 @@ function linkInstallmentPayment_(body) {
     if (String(donation.DonorID) !== String(plan.DonorID)) throw new Error('Choose a receipt for this donor.');
     if (donation.InstallmentPlanID && donation.InstallmentPlanID !== plan.PlanID) {
       throw new Error('This receipt is already linked to another commitment.');
+    }
+    if (!donation.InstallmentPlanID) {
+      var paid = donations.reduce(function (sum, receipt) {
+        return receipt.InstallmentPlanID === plan.PlanID && String(receipt.DonorID) === String(plan.DonorID)
+          ? sum + Math.round(Number(receipt.Amount) * 100) : sum;
+      }, 0);
+      if (Math.round(Number(donation.Amount) * 100) > Math.round(collectionPlanProgress_(plan, paid).outstanding * 100)) {
+        throw new Error('This receipt exceeds the remaining commitment. Keep any extra donation on a separate receipt.');
+      }
     }
   }
   return updateRecord_(CONFIG.sheetNames.donations, HEADERS.donations,

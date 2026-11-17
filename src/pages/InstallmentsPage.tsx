@@ -103,6 +103,7 @@ function Commitment({ plan, donorName, phone, receipts, busy, save }: {
   const [messageType, setMessageType] = useState<'update' | 'reminder' | null>(null)
   const schedule: Installment[] = JSON.parse(plan.schedule)
   const linked = receipts.filter((receipt) => receipt.installmentPlanID === plan.planID)
+    .sort((first, second) => second.date.localeCompare(first.date))
   const received = linked.reduce((sum, receipt) => sum + Math.round(receipt.amount * 100), 0)
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
   const { committed, installments } = schedule.reduce((result, item) => {
@@ -113,12 +114,14 @@ function Commitment({ plan, donorName, phone, receipts, busy, save }: {
   }, { committed: 0, installments: [] as Array<Installment & { remaining: number }> })
   const pending = installments.filter((item) => item.remaining > 0)
   const next = pending[0]
+  const outstanding = Math.max(0, committed - received)
+  const linkable = receipts.filter((receipt) => !receipt.installmentPlanID && Math.round(receipt.amount * 100) <= outstanding)
   const overdue = pending.filter((item) => item.due < today).length
   const message = [
     'Hare Krishna, ' + donorName + '.',
     messageType === 'reminder' ? 'A gentle reminder about your commitment towards ' + plan.purpose + '.' : 'Thank you for supporting ' + plan.purpose + '.',
     'We have received ' + money(received) + ' towards your commitment of ' + money(committed) + '.',
-    (schedule.length - pending.length) + ' of ' + schedule.length + ' installments are fully paid. ' + pending.length + ' pending. Outstanding amount ' + money(Math.max(0, committed - received)) + '.',
+    (schedule.length - pending.length) + ' of ' + schedule.length + ' installments are fully paid. ' + pending.length + ' pending. Outstanding amount ' + money(outstanding) + '.',
     next ? 'The next unpaid installment has ' + money(next.remaining) + ' remaining, due ' + formatDate(next.due) + '.' : '',
     'Thank you for your continued support.',
   ].filter(Boolean).join('\n')
@@ -134,9 +137,10 @@ function Commitment({ plan, donorName, phone, receipts, busy, save }: {
       <div className="grid gap-2 text-sm sm:grid-cols-3">
         <p>Committed <strong>{money(committed)}</strong></p>
         <p>Received <strong>{money(received)}</strong></p>
-        <p>Outstanding <strong>{money(Math.max(0, committed - received))}</strong></p>
+        <p>Outstanding <strong>{money(outstanding)}</strong></p>
       </div>
       <p className="text-sm">{schedule.length - pending.length} fully paid · {pending.length} pending · {overdue} overdue</p>
+      {!next && <p className="text-sm font-semibold text-emerald-700">Commitment fully paid</p>}
       {next && <p className="text-sm">Next unpaid installment: {money(next.remaining)} due {formatDate(next.due)}</p>}
       {received > committed && <p className="text-sm">Received above commitment: {money(received - committed)}</p>}
       <details className="text-sm">
@@ -148,17 +152,17 @@ function Commitment({ plan, donorName, phone, receipts, busy, save }: {
         <Field label="Choose an existing donation receipt">
           <Select value={receiptID} onChange={(event) => setReceiptID(event.target.value)}>
             <option value="">Select receipt</option>
-            {receipts.filter((receipt) => !receipt.installmentPlanID).map((receipt) => <option key={receipt.donationID} value={receipt.donationID}>
+            {linkable.map((receipt) => <option key={receipt.donationID} value={receipt.donationID}>
               {receipt.receiptNumber || receipt.donationID} · {formatDate(receipt.date)} · {formatCurrency(receipt.amount)} · {receipt.purpose || receipt.category}
             </option>)}
           </Select>
         </Field>
-        <Button disabled={!receiptID || busy} onClick={async () => {
+        <Button disabled={busy || !linkable.some((receipt) => receipt.donationID === receiptID)} onClick={async () => {
           if (await save(() => dataService.linkInstallmentPayment(plan.planID, receiptID))) setReceiptID('')
         }}>Link payment</Button>
       </div>
       {linked.length > 0 && <ul className="space-y-1 text-sm">{linked.map((receipt) => <li key={receipt.donationID} className="flex items-center gap-2">
-        <span>{receipt.receiptNumber || receipt.donationID} · {formatCurrency(receipt.amount)}</span>
+        <span>{receipt.receiptNumber || receipt.donationID} · {formatDate(receipt.date)} · {formatCurrency(receipt.amount)} · {receipt.paymentMethod}</span>
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save(() => dataService.linkInstallmentPayment(plan.planID, receipt.donationID, true))}>Unlink</Button>
       </li>)}</ul>}
       <div className="flex flex-wrap gap-2">
