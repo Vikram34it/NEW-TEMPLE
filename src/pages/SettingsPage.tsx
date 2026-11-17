@@ -352,7 +352,7 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
 
 function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
   const { recipient, password } = share
-  const [phone, setPhone] = useState(recipient.phone || '')
+  const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
