@@ -48,9 +48,10 @@ const statusColors: Record<CollectionEntry['status'], string> = {
   Cancelled: 'bg-slate-100 text-slate-700',
 }
 
-function CollectionTable({ rows, admin = false, actions }: {
+function CollectionTable({ rows, admin = false, history = false, actions }: {
   rows: CollectionEntry[]
   admin?: boolean
+  history?: boolean
   actions: (row: CollectionEntry) => ReactNode
 }) {
   const columns: Column<CollectionEntry>[] = [
@@ -96,9 +97,96 @@ function CollectionTable({ rows, admin = false, actions }: {
     columns.splice(2, 0, { header: 'Collector', accessor: 'collector' })
   }
 
-  const visibleColumns = admin ? columns.filter((column) => column.header !== 'Reference' && column.header !== 'Review note') : columns
-  return <DataTable columns={visibleColumns} data={rows} rowKey={(row) => row.id} actions={actions}
+  const visibleColumns = columns.filter((column) =>
+    !(admin && ['Reference', 'Review note'].includes(column.header)) &&
+    !(history && column.header === 'Installments paid / pending'))
+  const searchableRows = rows.map((row) => ({
+    ...row, donorName: row.details.name, paymentType: row.details.kind, collectionDate: row.details.date,
+    paymentReference: row.details.reference,
+  }))
+  return <DataTable columns={visibleColumns} data={searchableRows} rowKey={(row) => row.id} actions={actions}
+    searchable={!admin} searchPlaceholder="Search by donor, date, or reference"
     toolbar={<p className="text-xs text-slate-500">{rows.length} {rows.length === 1 ? 'submission' : 'submissions'}</p>} />
+}
+
+type CollectorView = 'all' | 'Pending review' | 'Needs correction' | 'Approved' | 'pending' | 'completed'
+
+type CommitmentRow = {
+  id: string
+  donor: string
+  purpose: string
+  type: 'Installment commitment' | 'One-time donation' | 'Materials delivered'
+  pledged: number
+  received: number
+  outstanding: number
+  nextDue: string
+  paidCount: number
+  pendingCount: number
+  entry: CollectionEntry
+}
+
+function collectorOverview(rows: CollectionEntry[]) {
+  const history = rows.filter((row) => row.status === 'Approved')
+    .sort((first, second) => second.details.date.localeCompare(first.details.date) ||
+      second.submittedAt.localeCompare(first.submittedAt))
+  const commitments = new Map<string, CommitmentRow>()
+  const settledCollections: CommitmentRow[] = []
+  let collectedPaise = 0
+  for (const entry of history) {
+    const { details, installment } = entry
+    if (details.kind !== 'materials') collectedPaise += Math.round(Number(details.amount || 0) * 100)
+    if (installment && !commitments.has(installment.id)) {
+      commitments.set(installment.id, {
+        id: installment.id, donor: details.name, purpose: installment.purpose,
+        type: 'Installment commitment', pledged: installment.committed, received: installment.received,
+        outstanding: installment.outstanding, nextDue: installment.nextDue,
+        paidCount: installment.paidCount, pendingCount: installment.pendingCount, entry,
+      })
+    }
+    if (details.kind === 'one-time' || (details.kind === 'materials' && details.delivery === 'Delivered')) {
+      const materials = details.kind === 'materials'
+      settledCollections.push({
+        id: entry.id, donor: details.name, purpose: materials ? summary(details) : details.category,
+        type: materials ? 'Materials delivered' : 'One-time donation',
+        pledged: 0, received: Number(details.amount || 0), outstanding: 0, nextDue: '',
+        paidCount: 0, pendingCount: 0, entry,
+      })
+    }
+  }
+  const plans = [...commitments.values()]
+  const pending = plans.filter((plan) => plan.outstanding > 0).sort((first, second) =>
+    (first.nextDue || '9999').localeCompare(second.nextDue || '9999') || first.donor.localeCompare(second.donor))
+  const completed = [...plans.filter((plan) => plan.outstanding === 0), ...settledCollections]
+    .sort((first, second) => second.entry.details.date.localeCompare(first.entry.details.date))
+  const totals = plans.reduce((sum, plan) => ({
+    pledged: sum.pledged + Math.round(plan.pledged * 100),
+    received: sum.received + Math.round(plan.received * 100),
+    outstanding: sum.outstanding + Math.round(plan.outstanding * 100),
+  }), { pledged: 0, received: 0, outstanding: 0 })
+  return { history, pending, completed, totals, collectedPaise }
+}
+
+function CommitmentTable({ rows, pending, actions }: {
+  rows: CommitmentRow[]
+  pending: boolean
+  actions: (row: CommitmentRow) => ReactNode
+}) {
+  const columns: Column<CommitmentRow>[] = [
+    { header: 'Donor', accessor: 'donor', sortable: true },
+    { header: 'Type', accessor: 'type' },
+    { header: 'Purpose', accessor: 'purpose' },
+    { header: 'Pledged', accessor: (row) => row.pledged ? formatCurrency(row.pledged) : '—', sortKey: 'pledged', sortable: true },
+    { header: 'Received', accessor: (row) => row.type === 'Materials delivered' ? '—' : formatCurrency(row.received), sortKey: 'received', sortable: true },
+    { header: 'Installments', accessor: (row) => row.type === 'Installment commitment' ? `${row.paidCount} paid / ${row.pendingCount} remaining` : '—' },
+  ]
+  if (pending) {
+    columns.push(
+      { header: 'Outstanding', accessor: (row) => formatCurrency(row.outstanding), sortKey: 'outstanding', sortable: true },
+      { header: 'Next due', accessor: (row) => row.nextDue ? formatDate(row.nextDue) : '—', sortKey: 'nextDue', sortable: true },
+    )
+  }
+  return <DataTable columns={columns} data={rows} rowKey={(row) => row.id} actions={actions} searchable
+    searchPlaceholder="Search by donor, purpose, or type" />
 }
 
 function LiveCollectionsPage() {
@@ -110,7 +198,7 @@ function LiveCollectionsPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<CollectionEntry | null>(null)
   const [paymentFor, setPaymentFor] = useState<CollectionEntry | null>(null)
-  const [filter, setFilter] = useState<CollectionEntry['status'] | 'all'>('all')
+  const [filter, setFilter] = useState<CollectorView>('pending')
   const [selected, setSelected] = useState<CollectionEntry | null>(null)
 
   async function load() {
@@ -130,12 +218,24 @@ function LiveCollectionsPage() {
 
   useEffect(() => { void load() }, [])
 
-  const statuses = [
-    { label: 'Pending review', status: 'Pending review', color: 'bg-amber-50 text-amber-900' },
-    { label: 'Needs correction', status: 'Needs correction', color: 'bg-rose-50 text-rose-900' },
-    { label: 'Approved', status: 'Approved', color: 'bg-emerald-50 text-emerald-900' },
-  ] as const
-  const filtered = filter === 'all' ? rows : rows.filter((row) => row.status === filter)
+  const overview = collectorOverview(rows)
+  const views: { id: CollectorView; label: string; count: number }[] = [
+    { id: 'pending', label: 'Pending installments', count: overview.pending.length },
+    { id: 'completed', label: 'Completed collections', count: overview.completed.length },
+    { id: 'Approved', label: 'Approved history', count: overview.history.length },
+    { id: 'Pending review', label: 'Pending review', count: rows.filter((row) => row.status === 'Pending review').length },
+    { id: 'Needs correction', label: 'Needs correction', count: rows.filter((row) => row.status === 'Needs correction').length },
+    { id: 'all', label: 'All submissions', count: rows.length },
+  ]
+  const title = views.find((view) => view.id === filter)?.label
+  const commitmentRows = filter === 'pending' ? overview.pending : filter === 'completed' ? overview.completed : null
+  const filtered = filter === 'Approved' ? overview.history : filter === 'all' ? rows : rows.filter((row) => row.status === filter)
+  const metrics = [
+    { label: 'Installment pledges', paise: overview.totals.pledged },
+    { label: 'Paid toward pledges', paise: overview.totals.received },
+    { label: 'Remaining to collect', paise: overview.totals.outstanding },
+    { label: 'My approved collections', paise: overview.collectedPaise },
+  ]
 
   function openCollection(entry: CollectionEntry | null = null, payment: CollectionEntry | null = null) {
     setMessage('')
@@ -157,39 +257,46 @@ function LiveCollectionsPage() {
 
       {message && <p className="rounded-lg bg-emerald-50 p-3 text-emerald-800" role="status">{message}</p>}
 
+      <section aria-label="Collection totals" className="space-y-2">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {metrics.map(({ label, paise }) => (
+            <Card key={label} className="p-3 sm:p-4">
+              <p className="text-sm text-slate-600">{label}</p>
+              <p className="mt-1 text-lg font-semibold tabular-nums text-slate-900 sm:text-2xl">{loading || error ? '—' : formatCurrency(paise / 100)}</p>
+            </Card>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">Pledge totals include all approved payments on commitments you’ve collected for. My approved collections totals only the payments you recorded.</p>
+      </section>
+
       {formOpen && (
         <div id="collection-entry" className="mx-auto max-w-3xl scroll-mt-4">
           <CollectionForm entry={editing} paymentFor={paymentFor} representative={user?.name || ''} onCancel={() => setFormOpen(false)} onSaved={async (id) => {
             setFormOpen(false)
             setMessage('Submitted for approval · ' + id.slice(0, 12))
-            setFilter('all')
+            setFilter('Pending review')
             await load()
           }} />
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="Filter collections by status">
-        {statuses.map(({ label, status, color }) => (
-          <button key={status} type="button" aria-pressed={filter === status}
-            onClick={() => setFilter(filter === status ? 'all' : status)}
-            className={`rounded-xl p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 sm:p-4 ${color} ${filter === status ? 'ring-2 ring-current' : ''}`}>
-            <span className="block text-xl font-semibold tabular-nums">
-              {loading || error ? '—' : rows.filter((row) => row.status === status).length}
-            </span>
-            <span className="block text-xs font-medium sm:text-sm">{label}</span>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Collection views">
+        {views.map(({ id, label, count }) => (
+          <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}
+            className={`rounded-lg border px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 ${filter === id ? 'border-orange-700 bg-orange-700 text-white' : 'border-slate-200 bg-white text-slate-700'}`}>
+            {label} <span className="tabular-nums">({loading || error ? '—' : count})</span>
           </button>
         ))}
       </div>
 
       <Card className="space-y-3 p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="font-semibold">{filter === 'all' ? 'My Collections' : filter}</h2>
+          <h2 className="font-semibold">{title}</h2>
           <Button variant="secondary" disabled={loading} onClick={load}>Refresh</Button>
         </div>
-        {filter !== 'all' && <button type="button" className="text-sm font-medium text-orange-700" onClick={() => setFilter('all')}>Show all statuses</button>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
         {loading && <p role="status" className="text-sm text-slate-500">Loading collections…</p>}
-        {!loading && !filtered.length && !error && (
+        {!loading && !(commitmentRows?.length ?? filtered.length) && !error && (
           <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
             {filter === 'all' ? (
               <>
@@ -199,10 +306,17 @@ function LiveCollectionsPage() {
                   <Plus size={18} /> Record your first collection
                 </Button>}
               </>
-            ) : <p>No collections with this status.</p>}
+            ) : <p>{filter === 'pending' ? 'No installments outstanding.' :
+              filter === 'completed' ? 'No completed collections yet.' : 'No submissions in this view.'}</p>}
           </div>
         )}
-        {filtered.length > 0 && <CollectionTable key={filter} rows={filtered} actions={(row) => (
+        {!!commitmentRows?.length && <CommitmentTable key={filter} rows={commitmentRows} pending={filter === 'pending'} actions={(row) => (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setSelected(row.entry)}>View</Button>
+            {filter === 'pending' && <Button size="sm" disabled={formOpen} onClick={() => openCollection(null, row.entry)}>Record payment</Button>}
+          </div>
+        )} />}
+        {!commitmentRows && filtered.length > 0 && <CollectionTable key={filter} rows={filtered} history={filter === 'Approved'} actions={(row) => (
           <Button variant="secondary" onClick={() => setSelected(row)}>View</Button>
         )} />}
       </Card>
