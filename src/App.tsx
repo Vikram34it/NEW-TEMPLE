@@ -24,13 +24,14 @@ import { EventsPage } from './pages/EventsPage'
 import { RequestsPage } from './pages/RequestsPage'
 import { DonorCarePage } from './pages/DonorCarePage'
 import { BulkMessagingPage } from './pages/BulkMessagingPage'
+import { isCollectorPortal } from './config/portal'
 
 export default function App() {
   return (
     <AppProvider>
       <HashRouter>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
+          <Route path="/login" element={<LoginPage staff={isCollectorPortal} />} />
           <Route path="/staff-login" element={<LoginPage key="staff" staff />} />
           <Route element={<AppLayout />}>
             <Route path="/" element={<HomeRoute />} />

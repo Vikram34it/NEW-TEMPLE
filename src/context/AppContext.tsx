@@ -28,6 +28,8 @@ import type {
   Vendor,
 } from '../types'
 
+import { sessionKeyPrefix } from '../config/portal'
+
 interface ToastItem {
   id: number
   type: 'success' | 'error'
@@ -38,7 +40,7 @@ const AppContext = createContext<AppContextValue | null>(null)
 
 const CONFIG_USE_LIVE = !CONFIG.useMockData && !!CONFIG.webAppUrl
 
-const SESSION_KEY = 'temple_session_user'
+const SESSION_KEY = sessionKeyPrefix + '_user'
 
 function loadSessionUser(): User | null {
   try {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Save, Plus, Pencil, Trash2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useApp } from '../context/AppContext'
+import { isCollectorPortal } from '../config/portal'
 import { Button, Card, CardHeader, Field, Input, Select, Badge, Modal, PageHeader, Textarea } from '../components/ui'
 import { DataTable } from '../components/DataTable'
 import type { Column } from '../components/DataTable'
@@ -397,10 +398,10 @@ function LoginShareForm({ share, templeName, onResetPin }: { share: LoginShare; 
     })
     return () => { active = false }
   }, [collectorID])
-  const loginUrl = new URL(window.location.href)
+  const loginUrl = isCollectorPortal ? new URL('../', window.location.href) : new URL(window.location.href)
   loginUrl.search = ''
   loginUrl.hash = isDonor ? '/login' : '/staff-login'
-  const signInLink = isCollector ? 'https://vikram34it.github.io/iskconmangalagiri/#/staff-login' : loginUrl.href
+  const signInLink = isCollector ? 'https://vikram34it.github.io/iskconmangalagiri/collector/' : loginUrl.href
   const digits = phone.replace(/\D/g, '')
   const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
   const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)

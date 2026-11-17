@@ -4,6 +4,7 @@ import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { homePathForRole } from '../navigation'
 import { CONFIG } from '../config/apiConfig'
+import { isCollectorPortal } from '../config/portal'
 import { dataService } from '../services/apiService'
 import templeImage from '../assets/temple-donor.png'
 import { Button, Card, Field, Input, Modal, Select } from '../components/ui'
@@ -83,7 +84,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
           <div className="inline-flex w-16 h-16 rounded-2xl bg-orange-600 items-center justify-center text-white mb-3">
             <Signature size={32} />
           </div>
-          <h1 className="text-2xl font-bold text-slate-800">Temple Management</h1>
+          <h1 className="text-2xl font-bold text-slate-800">{isCollectorPortal ? 'ISKCON Collector' : 'Temple Management'}</h1>
           <p className="text-slate-500 text-sm mt-1">{staff ? 'Staff and Admin Login' : 'Donor Login'}</p>
         </div>
 

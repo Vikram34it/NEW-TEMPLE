@@ -1,4 +1,5 @@
 import { CONFIG } from '../config/apiConfig'
+import { sessionKeyPrefix } from '../config/portal'
 import { buildDashboardData, mockData } from '../data/mockData'
 import { accountNameForPaymentMethod, normalizePhone } from '../utils/helpers'
 import type {
@@ -67,7 +68,7 @@ export interface ResetRunResult extends ResetPreviewResult {
   success: boolean
 }
 
-const SESSION_TOKEN_KEY = 'temple_session_token'
+const SESSION_TOKEN_KEY = sessionKeyPrefix + '_token'
 let sessionToken = ''
 try {
   sessionToken = window.sessionStorage.getItem(SESSION_TOKEN_KEY) || ''
