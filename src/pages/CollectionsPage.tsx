@@ -10,7 +10,7 @@ import type { CollectionDetails, CollectionDonor, CollectionEntry, CollectionPla
 import { formatCurrency, formatDate, formatDateTime, normalizePhone, parseDateInput, todayStr } from '../utils/helpers'
 
 const sevas = ['Yudhisthra', 'Bhima', 'Arjuna', 'Nakula', 'Sahadeva']
-const purposes = ['General Donation', 'Land Purchase', 'Temple Construction', 'Seva', 'Other']
+const constructionPurpose = 'Temple Construction'
 const methods = ['Cash', 'UPI', 'Bank Transfer', 'Cheque']
 const amountPattern = /^[0-9]+$/
 
@@ -18,7 +18,7 @@ function emptyCollection(): CollectionDetails {
   return {
     donorID: '', name: '', phone: '', email: '', address: '', office: '', mailing: 'Residence',
     pan: '', aadhaar: '', gotram: '', prayer1: '', prayerDate1: '', prayer2: '', prayerDate2: '', referrals: '',
-    seva: '', category: 'General Donation', kind: 'one-time',
+    seva: '', category: constructionPurpose, kind: 'one-time',
     planID: '', date: todayStr(), method: 'Cash', reference: '', item: '', unit: '', delivery: 'Promised', site: '',
   }
 }
@@ -256,9 +256,8 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
     setData((previous) => ({ ...previous, [key]: value }))
   }
 
-  function applyScan({ paperAmount, ...draft }: Awaited<ReturnType<typeof dataService.scanCollectionForm>>) {
+  function applyScan({ paperAmount, category: _scannedPurpose, ...draft }: Awaited<ReturnType<typeof dataService.scanCollectionForm>>) {
     if (draft.seva && !sevas.includes(draft.seva)) delete draft.seva
-    if (draft.category && !purposes.includes(draft.category)) delete draft.category
     if (draft.method && !methods.includes(draft.method)) delete draft.method
     if (draft.kind && !['one-time', 'installment', 'materials'].includes(draft.kind)) delete draft.kind
     if (draft.mailing && !['Residence', 'Office'].includes(draft.mailing)) delete draft.mailing
@@ -394,7 +393,7 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
             <h2 className="font-semibold">Contribution</h2>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Contribution type" required>
-                <Select value={data.kind} onChange={(e) => setData({ ...data, kind: e.target.value as CollectionDetails['kind'], planID: '', ...(e.target.value === 'materials' ? { category: 'Temple Construction' } : {}) })}>
+                <Select value={data.kind} onChange={(e) => setData({ ...data, kind: e.target.value as CollectionDetails['kind'], planID: '' })}>
                   <option value="one-time">One-time payment</option>
                   <option value="installment">Installment payment</option>
                   <option value="materials">Construction materials</option>
@@ -405,8 +404,10 @@ function CollectionForm({ entry, representative, onCancel, onSaved }: {
                   <option value="">Select seva</option>{sevas.map((seva) => <option key={seva}>{seva}</option>)}
                 </Select>
               </Field>
-              <Field label="Purpose" required>
-                <Select value={data.category} onChange={(e) => change('category', e.target.value)}>{purposes.map((purpose) => <option key={purpose}>{purpose}</option>)}</Select>
+              <Field label="Purpose of donation" hint={data.category === constructionPurpose
+                ? 'All new collections are for temple construction only.'
+                : 'Original purpose of this collection.'}>
+                <Input value={data.category} readOnly />
               </Field>
               {field('Collection date', 'date', { required: true, type: 'date' })}
               {data.kind === 'installment' && (
