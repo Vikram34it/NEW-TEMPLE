@@ -21,6 +21,7 @@ export function SettingsPage() {
   const [showUser, setShowUser] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [loginShare, setLoginShare] = useState<LoginShare | null>(null)
+  const [pinRecipient, setPinRecipient] = useState<User | null>(null)
   const [showReset, setShowReset] = useState(false)
   const [tab, setTab] = useState<'temple' | 'users' | 'audit' | 'messaging'>('temple')
 
@@ -273,8 +274,11 @@ export function SettingsPage() {
           rowKey={(u) => u.userID}
           toolbar={can('*') && <Button size="sm" onClick={() => setShowUser(true)}><Plus size={14} /> Add User</Button>}
           actions={(u) => can('*') && (
-            <div className="flex gap-1 justify-end">
+            <div className="flex flex-wrap gap-1 justify-end">
               {u.status === 'active' && <Button size="sm" variant="secondary" onClick={() => setLoginShare({ recipient: u })}>Share login</Button>}
+              {u.role === 'collector' && (
+                <Button size="sm" variant="secondary" onClick={() => setPinRecipient(u)}>Reset PIN</Button>
+              )}
               <button onClick={() => setEditUser(u)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
               {u.userID !== 'USR-0001' && (
                 <button onClick={() => { if (confirm(`Delete user ${u.name}?`)) void deleteUser(u.userID).catch(() => {}) }} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
@@ -332,6 +336,12 @@ export function SettingsPage() {
         </Modal>
       )}
 
+      {pinRecipient && can('*') && (
+        <Modal open onClose={() => setPinRecipient(null)} title={`Reset PIN for ${pinRecipient.name}`}>
+          <CollectorPinForm recipient={pinRecipient} onDone={() => setPinRecipient(null)} />
+        </Modal>
+      )}
+
       <Modal open={showReset} onClose={() => setShowReset(false)} title="Reset All Transactions">
         <ResetAllForm onDone={() => setShowReset(false)} />
       </Modal>
@@ -351,12 +361,7 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
 }
 
 function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
-  const { updateUser } = useApp()
-  const { recipient } = share
-  const [password, setPassword] = useState(share.password)
-  const [newPin, setNewPin] = useState('')
-  const [resetting, setResetting] = useState(false)
-  const [pinReset, setPinReset] = useState(false)
+  const { recipient, password } = share
   const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -370,7 +375,6 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
   const digits = phone.replace(/\D/g, '')
   const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
   const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
-  const needsCollectorPin = isCollector && !password
   const message = [
     `*Hare Krishna, ${recipient.name}!*`,
     '',
@@ -379,9 +383,9 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     ...(isCollector
       ? [`Select your name *${recipient.name}* from the dropdown list.`]
       : [isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`]),
-    password
-      ? `*${isCollector && /^\d{4,6}$/.test(password) ? 'PIN' : 'Password'}:* ${password}`
-      : `Use your current password${isDonor || isCollector ? ' or PIN' : ''}.`,
+    ...(isCollector ? [] : [password
+      ? `*Password:* ${password}`
+      : `Use your current password${isDonor ? ' or PIN' : ''}.`]),
     ...(summary ? [
       '',
       '*Your contribution summary*',
@@ -391,23 +395,6 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     '',
     isDonor ? 'Sign in to view your donations and receipts. Thank you for your support!' : 'Thank you for your service!',
   ].join('\n')
-
-  const resetPin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (resetting || !/^\d{6}$/.test(newPin)) return
-    setError('')
-    setResetting(true)
-    try {
-      await updateUser({ userID: recipient.userID, password: newPin })
-      setPassword(newPin)
-      setNewPin('')
-      setPinReset(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reset the collector PIN.')
-    } finally {
-      setResetting(false)
-    }
-  }
 
   const toggleSummary = async () => {
     setError('')
@@ -435,28 +422,62 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
           {loading ? 'Loading summary…' : summary ? 'Remove contribution summary' : 'Include contribution summary'}
         </Button>
       )}
-      {needsCollectorPin && (
-          <form className="space-y-3 rounded-lg border border-slate-200 p-3" onSubmit={resetPin}>
-          <p className="text-sm font-medium">Set a new PIN to include in the WhatsApp message.</p>
-          <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
-            <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
-              required disabled={resetting} value={newPin} onChange={(e) => setNewPin(e.target.value)} />
-          </Field>
-          <Button type="submit" disabled={resetting || !/^\d{6}$/.test(newPin)}>
-            {resetting ? 'Saving PIN…' : 'Save PIN and prepare message'}
-          </Button>
-          </form>
-      )}
-      {pinReset && <p role="status" className="text-sm text-emerald-700">New PIN saved and added to the draft.</p>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      {!needsCollectorPin && <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>}
+      <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
-        <Button disabled={!validPhone || resetting || needsCollectorPin} onClick={() => window.open(
+        <Button disabled={!validPhone} onClick={() => window.open(
           `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
         )}>Open WhatsApp draft</Button>
       </div>
     </div>
+  )
+}
+
+function CollectorPinForm({ recipient, onDone }: { recipient: User; onDone: () => void }) {
+  const { updateUser } = useApp()
+  const [newPin, setNewPin] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const validPin = /^\d{6}$/.test(newPin)
+
+  const resetPin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validPin || saving || saved) return
+    setError('')
+    setSaving(true)
+    try {
+      await updateUser({ userID: recipient.userID, password: newPin })
+      setSaved(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reset the collector PIN.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={resetPin}>
+      {saved ? (
+        <>
+          <p role="status" className="text-sm text-emerald-700">New PIN saved. Give it to {recipient.name} separately.</p>
+          <Field label="Saved PIN">
+            <Input value={newPin} readOnly onFocus={(event) => event.currentTarget.select()} />
+          </Field>
+        </>
+      ) : (
+        <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
+          <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
+            required disabled={saving} value={newPin} onChange={(event) => setNewPin(event.target.value)} />
+        </Field>
+      )}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" disabled={saving} onClick={onDone}>{saved ? 'Done' : 'Cancel'}</Button>
+        {!saved && <Button type="submit" disabled={!validPin || saving}>{saving ? 'Saving PIN…' : 'Save new PIN'}</Button>}
+      </div>
+    </form>
   )
 }
 
@@ -484,7 +505,9 @@ function UserForm({ initial, onDone, onShare }: { initial?: Partial<User>; onDon
       } else {
         recipient = await addUser(form as Omit<User, 'userID' | 'createdDate'>)
       }
-      if (shareAfterSave && recipient.status === 'active') onShare({ recipient, password: form.password })
+      if (shareAfterSave && recipient.status === 'active') {
+        onShare({ recipient, password: recipient.role === 'collector' ? undefined : form.password })
+      }
       onDone()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save user')
