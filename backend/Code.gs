@@ -1479,7 +1479,7 @@ function getCollections_(user, ownOnly) {
 }
 
 function scanCollectionForm_(body) {
-  var key = scriptProperties.getProperty('COLLECTION_SCAN_GEMINI_KEY');
+  var key = (scriptProperties.getProperty('COLLECTION_SCAN_GEMINI_KEY') || '').trim();
   if (!key) throw new Error('Photo scanning is not configured. Ask your administrator to enable it.');
   var image = body.image;
   if (body.confirmed !== true || typeof image !== 'string' || image.length > 2800000 ||
@@ -1505,7 +1505,7 @@ function scanCollectionForm_(body) {
     'Use committedAmount only for an explicit total pledge, installmentCount for the number of installments and firstDue for the first installment due date.',
     'For rupee amounts return digits without grouping or symbols when they are whole rupees. Return delivery as Promised or Delivered.',
   ].join('\n');
-  var model = scriptProperties.getProperty('COLLECTION_SCAN_GEMINI_MODEL') || 'gemini-2.5-flash';
+  var model = (scriptProperties.getProperty('COLLECTION_SCAN_GEMINI_MODEL') || '').trim() || 'gemini-3.8-flash';
   if (!/^gemini-[a-z0-9.-]+$/.test(model)) throw new Error('The photo scanner model setting is invalid.');
   var response;
   try {
@@ -1522,9 +1522,7 @@ function scanCollectionForm_(body) {
   } catch (err) {
     throw new Error('The photo scanner could not connect. Try again or enter the details manually.');
   }
-  if (response.getResponseCode() !== 200) {
-    throw new Error('The photo scanner is unavailable. Ask your administrator to check its configuration and quota.');
-  }
+  if (response.getResponseCode() !== 200) throw new Error(collectionScanError_(response));
   var scanned;
   try {
     var candidate = JSON.parse(response.getContentText()).candidates[0];
@@ -1541,6 +1539,29 @@ function scanCollectionForm_(body) {
     if (value && value.length <= limits[field]) result[field] = value;
   });
   return result;
+}
+
+function collectionScanError_(response) {
+  var code = response.getResponseCode();
+  var error = {};
+  try {
+    error = JSON.parse(response.getContentText()).error || {};
+  } catch (err) {
+    // Use the HTTP status when the upstream response isn't JSON.
+  }
+  var invalidKey = Array.isArray(error.details) && error.details.some(function (detail) {
+    return detail && /^(API_KEY_INVALID|API_KEY_EXPIRED|API_KEY_SERVICE_BLOCKED)$/.test(detail.reason);
+  });
+  var prefix = 'Photo scanner (Gemini HTTP ' + code + '): ';
+  if (invalidKey || code === 401 || code === 403) {
+    return prefix + 'Check that COLLECTION_SCAN_GEMINI_KEY is valid and allowed to call the Gemini API.';
+  }
+  if (code === 404) return prefix + 'The configured model is unavailable. Set COLLECTION_SCAN_GEMINI_MODEL to an available image-capable model, such as gemini-3.8-flash.';
+  if (code === 429) return prefix + 'Usage limit reached. Check the Gemini project quota and billing before retrying.';
+  if (error.status === 'FAILED_PRECONDITION') return prefix + 'The Gemini project does not meet a service requirement. Check billing and regional availability in Google AI Studio.';
+  if (code === 400 || code === 413) return prefix + 'Gemini rejected the scan request. Try a smaller JPEG, or ask your administrator to check the scanner settings.';
+  if (code >= 500) return prefix + 'Gemini could not process the scan right now. Try again shortly.';
+  return prefix + 'Gemini rejected the request. Ask your administrator to check the scanner configuration.';
 }
 
 function collectionText_(value, limit) {
