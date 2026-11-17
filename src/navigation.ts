@@ -19,12 +19,14 @@ export const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   },
   {
     title: 'Overview',
-    items: [{ path: '/', label: 'Dashboard', roles: ['admin', 'accountant', 'manager', 'viewer'] }],
+    items: [
+      { path: '/', label: 'Dashboard', roles: ['admin', 'accountant', 'manager', 'viewer'] },
+      { path: '/collections', label: 'Collections', roles: ['admin', 'collector'] },
+    ],
   },
   {
     title: 'Finance',
     items: [
-      { path: '/collections', label: 'Collections', roles: ['admin', 'collector'] },
       { path: '/donations', label: 'Donations', roles: ['admin', 'accountant'] },
       { path: '/installments', label: 'Donor Installments', roles: ['admin', 'accountant'] },
       { path: '/expenses', label: 'Expenses', roles: ['admin', 'accountant'] },

@@ -262,7 +262,7 @@ var READ_ROLES_ = Object.create(null);
   ['admin accountant manager', 'getPayments pendingPayments getAccounts accounts communications getCampaigns campaigns'],
   ['admin accountant', 'getTransactions transactions getInstallmentPlans'],
   ['admin collector', 'getCollections findCollectionDonors getCollectionPlans scanCollectionForm'],
-  ['admin', 'getAuditLog auditLog getDonorShareSummary getCollectorSharePin'],
+  ['admin', 'getAuditLog auditLog getDonorShareSummary getCollectorSharePin getFinanceFundDetails'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { READ_ROLES_[action] = group[0].split(' '); });
 });
@@ -275,7 +275,7 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin accountant', 'createDonation bulkCreateDonations bulkLinkDonorReceipts linkTransactionsToPerson updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
   ['admin collector', 'submitCollection'],
   ['admin', 'reviewCollection cancelCollection recordCollectionHandover receiveCollectionMaterials'],
-  ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings'],
+  ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings saveFinanceOpeningFunds'],
 ].forEach(function (group) {
   group[1].split(' ').forEach(function (action) { WRITE_ROLES_[action] = group[0].split(' '); });
 });
@@ -419,6 +419,12 @@ function modifyMessage_(action, body, user) {
 
 function route_(action, params, body, user) {
   switch (action) {
+    case 'getFinanceFundDetails':
+      if (!FINANCE_FUNDS_.some(function (fund) { return fund.id === body.fund; })) throw new Error('Choose a fund.');
+      return financeFunds_(readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts),
+        readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions), readDonations_(),
+        readAll_(CONFIG.sheetNames.expenses, HEADERS.expenses), body.fund).details;
+    case 'saveFinanceOpeningFunds': return saveFinanceOpeningFunds_(body);
     // --- Reads ---
     case 'getUsers': return safeUserRows_(user);
     case 'getCollectorSharePin': {
@@ -2715,6 +2721,140 @@ function getSettings_() {
  * DASHBOARD + REPORTS AGGREGATION
  * ========================================================================== */
 
+var FINANCE_FUNDS_ = [
+  { id: 'construction', name: 'Temple Construction' },
+  { id: 'books', name: 'Books' },
+  { id: 'general', name: 'General Donations' },
+  { id: 'land', name: 'Land Purchase' },
+  { id: 'other', name: 'Other designated funds' },
+  { id: 'unclassified', name: 'Awaiting classification' },
+];
+
+function financeOpeningKey_(id) { return 'FINANCE_OPENING_' + id; }
+
+function financeOpening_(account) {
+  var saved = scriptProperties.getProperty(financeOpeningKey_(account.AccountID));
+  if (!saved) return {};
+  var record = JSON.parse(saved);
+  // An edited opening balance needs a new allocation.
+  return record.opening === Math.round(toNum_(account.OpeningBalance) * 100) ? record.allocations : {};
+}
+
+function saveFinanceOpeningFunds_(body) {
+  var account = readAll_(CONFIG.sheetNames.accounts, HEADERS.accounts).find(function (row) {
+    return String(row.AccountID) === body.accountID && /^(cash|bank)$/i.test(row.Type);
+  });
+  if (!account) throw new Error('Choose a bank or cash account.');
+  var opening = Math.round(toNum_(account.OpeningBalance) * 100);
+  if (body.opening !== opening / 100) throw new Error('The opening balance changed. Refresh and try again.');
+  var allocations = {};
+  var total = 0;
+  FINANCE_FUNDS_.slice(0, -1).forEach(function (fund) {
+    var amount = (body.allocations || {})[fund.id] || 0;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 ||
+        Math.abs(amount * 100 - Math.round(amount * 100)) > 0.00001) {
+      throw new Error('Enter non-negative amounts with at most two decimal places.');
+    }
+    allocations[fund.id] = Math.round(amount * 100);
+    total += allocations[fund.id];
+  });
+  if (total > Math.max(0, opening)) throw new Error('The allocation exceeds the opening balance.');
+  scriptProperties.setProperty(financeOpeningKey_(account.AccountID), JSON.stringify({ opening: opening, allocations: allocations }));
+  audit_('finance', 'Allocate opening balance', account.AccountID, '', JSON.stringify(allocations));
+  return { success: true };
+}
+
+function financeFundID_(category, purpose, income) {
+  var tag = String(category || '').trim();
+  var purposeText = String(purpose || '');
+  if (isLandPurchase_(tag, purposeText)) return 'land';
+  if (/\b(?:book|books|book distribution|book fund|book sales)\b/i.test(tag + ' ' + purposeText)) return 'books';
+  if (isConstructionTagged_(tag, purposeText, '')) return 'construction';
+  if (/^general donations?$/i.test(tag)) return 'general';
+  if (income && /^(Deity Worship|Annadanam \/ Food Distribution|Festivals|Cow Protection|Education|Seva)$/i.test(tag)) return 'other';
+  return 'unclassified';
+}
+
+function financeFunds_(accounts, transactions, donations, expenses, selectedFund) {
+  var funds = FINANCE_FUNDS_.map(function (fund) {
+    return { id: fund.id, name: fund.name, bank: 0, cash: 0, received: 0, spent: 0 };
+  });
+  var byFund = new Map(funds.map(function (fund) { return [fund.id, fund]; }));
+  var liquid = accounts.filter(function (a) { return /^(bank|cash)$/i.test(a.Type); });
+  var accountByName = new Map(liquid.map(function (a) { return [String(a.AccountName), a]; }));
+  var accountByID = new Map(liquid.map(function (a) { return [String(a.AccountID), a]; }));
+  var sources = new Map(donations.concat(expenses).map(function (row) { return [String(row.DonationID || row.ExpenseID), row]; }));
+  var handoverFunds = new Map(donations.filter(function (row) { return row.CollectionID; }).map(function (row) {
+    return ['HANDOVER-' + row.CollectionID, financeFundID_(row.Category, row.BankImportKey ? '' : row.Purpose, true)];
+  }));
+  var matchedDeposits = new Map();
+  transactions.forEach(function (row) {
+    var reference = String(row.ReferenceID || '').split(':');
+    if (reference.length > 1 && row.IncomeOrExpense === 'expense' && handoverFunds.has(reference[0])) {
+      matchedDeposits.set(reference.slice(1).join(':'), handoverFunds.get(reference[0]));
+    }
+  });
+  var movement = new Map();
+  var details = [];
+  function add(fundID, account, paise, kind, date, reference, description) {
+    var fund = byFund.get(fundID);
+    var location = String(account.Type).toLowerCase();
+    fund[location] += paise;
+    if (kind === 'Receipt') fund.received += paise;
+    if (kind === 'Expense') fund.spent -= paise;
+    if (selectedFund === fundID && paise) {
+      details.push({ account: String(account.AccountName), date: date || '', reference: reference || '',
+        description: description || '', kind: kind, amount: paise / 100 });
+    }
+  }
+  var openingAccounts = liquid.map(function (account) {
+    var opening = Math.round(toNum_(account.OpeningBalance) * 100);
+    var stored = financeOpening_(account);
+    var allocations = {};
+    var assigned = 0;
+    FINANCE_FUNDS_.slice(0, -1).forEach(function (fund) {
+      var amount = stored[fund.id] || 0;
+      allocations[fund.id] = amount / 100;
+      assigned += amount;
+      add(fund.id, account, amount, 'Opening balance');
+    });
+    add('unclassified', account, opening - assigned, 'Opening balance');
+    movement.set(account, opening);
+    return { id: String(account.AccountID), name: String(account.AccountName), opening: opening / 100, allocations: allocations };
+  });
+  transactions.forEach(function (row) {
+    var account = accountByName.get(String(row.Account)) || accountByID.get(String(row.AccountID || ''));
+    if (!account || !/^(income|expense)$/.test(row.IncomeOrExpense)) return;
+    var income = row.IncomeOrExpense === 'income';
+    var reference = String(row.ReferenceID || '');
+    var source = sources.get(reference);
+    var transferFund = handoverFunds.get(reference.split(':')[0]) ||
+      (income && matchedDeposits.get(String(row.BankImportKey || '')));
+    var category = source ? source.Category : row.BankCategory;
+    var fundID = transferFund || financeFundID_(category, source && !source.BankImportKey ? source.Purpose : '', income);
+    var transfer = Boolean(transferFund) || row.BankCategory === 'Internal Transfer' || /^HANDOVER-COL-/.test(reference);
+    var asset = /^(Fixed Deposit|Fixed Deposit Closure)$/i.test(String(category || '')) ||
+      (!source && !income && /\bfd\b|fixed\s*deposit/i.test(String(row.Description || '')));
+    var paise = (income ? 1 : -1) * Math.round(toNum_(row.Amount) * 100);
+    movement.set(account, movement.get(account) + paise);
+    add(fundID, account, paise, transfer ? 'Transfer' : asset ? 'Fixed deposit' : income ? 'Receipt' : 'Expense',
+      row.Date instanceof Date ? Utilities.formatDate(row.Date, 'Asia/Kolkata', 'yyyy-MM-dd') : String(row.Date || ''),
+      reference, row.Description);
+  });
+  liquid.forEach(function (account) {
+    var difference = Math.round(toNum_(account.CurrentBalance) * 100) - movement.get(account);
+    add('unclassified', account, difference, 'Balance difference', '', '', 'Recorded account balance less opening balance and ledger movements');
+  });
+  return {
+    funds: funds.map(function (fund) {
+      return { id: fund.id, name: fund.name, bank: fund.bank / 100, cash: fund.cash / 100,
+        received: fund.received / 100, spent: fund.spent / 100 };
+    }),
+    openingAccounts: openingAccounts,
+    details: details.sort(function (a, b) { return b.date.localeCompare(a.date); }),
+  };
+}
+
 function buildDashboard_() {
   // The ledger + balances are already resynced inline after every money
   // mutation (see resyncLedger_()), so a read must NOT trigger the full
@@ -2737,6 +2877,7 @@ function buildDashboard_() {
   // assets held by the temple, not spends, so they get their own card and are
   // excluded from the expense totals.
   function isFixedDeposit_(t) {
+    if (String(t.BankCategory || '').trim() === 'Fixed Deposit') return true;
     var hint = (String(t.Description || '') + ' ' + String(t.Remark || '')).toLowerCase();
     return /\bfd\b|fixed\s*deposit/.test(hint);
   }
@@ -2764,7 +2905,7 @@ function buildDashboard_() {
     .map(function (e) { return { Amount: e.Amount, Category: e.Category || 'Other', Date: String(e.Date) }; })
     .concat(ledgerSpends
       .filter(function (t) { return !isFixedDeposit_(t); })
-      .map(function (t) { return { Amount: t.Amount, Category: 'Other', Date: String(t.Date) }; }));
+      .map(function (t) { return { Amount: t.Amount, Category: String(t.BankCategory || '').trim() || 'Other', Date: String(t.Date) }; }));
 
   var totalDonations = sumBy_(donations, 'Amount');
   var totalExpenses = sumBy_(expenseRows, 'Amount');
@@ -2794,6 +2935,7 @@ function buildDashboard_() {
   var thisMonth = now.getFullYear() + '-' + pad2_(now.getMonth() + 1);
   var thisMonthDonations = donations.filter(function (d) { return String(d.Date).indexOf(thisMonth) === 0; }).reduce(function (s, d) { return s + toNum_(d.Amount); }, 0);
   var thisMonthExpenses = expenseRows.filter(function (e) { return String(e.Date).indexOf(thisMonth) === 0; }).reduce(function (s, e) { return s + toNum_(e.Amount); }, 0);
+  var finance = financeFunds_(accounts, transactions, donations, expenseRecords);
 
   return {
     bankCreditCount: credits.length,
@@ -2807,8 +2949,11 @@ function buildDashboard_() {
     totalAssets: totalAssets,
     totalConstructionExpenses: totalConstruction,
     constructionDonations: constructionDonations,
+    approvedStaffReceipts: sumBy_(donations.filter(function (row) { return Boolean(row.CollectionID); }), 'Amount'),
     cashBalance: sumBy_(cash, 'CurrentBalance'),
     bankBalance: sumBy_(bank, 'CurrentBalance'),
+    funds: finance.funds,
+    openingFundAccounts: finance.openingAccounts,
     pendingPayments: pendingTotal,
     thisMonthDonations: thisMonthDonations,
     thisMonthExpenses: thisMonthExpenses,

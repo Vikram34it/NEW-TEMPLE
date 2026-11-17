@@ -28,6 +28,7 @@ const icons: Record<string, React.ReactNode> = {
   '/': <LayoutDashboard size={18} />,
   '/my-donations': <Heart size={18} />,
   '/donations': <HandCoins size={18} />,
+  '/collections': <HandCoins size={18} />,
   '/expenses': <Receipt size={18} />,
   '/people': <Users size={18} />,
   '/vendors': <Store size={18} />,
@@ -99,7 +100,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                       }
                     >
                       {icons[item.path]}
-                      {item.label}
+                      {user?.role === 'admin' && item.path === '/' ? 'Finance Dashboard'
+                        : user?.role === 'admin' && item.path === '/collections' ? 'Staff Collections Dashboard' : item.label}
                     </NavLink>
                   ))}
                 </div>

@@ -197,7 +197,35 @@ export interface Settings {
   waTemplateParamMap?: string
 }
 
+export interface FinanceFund {
+  id: string
+  name: string
+  bank: number
+  cash: number
+  received: number
+  spent: number
+}
+
+export interface FinanceOpeningAccount {
+  id: string
+  name: string
+  opening: number
+  allocations: Record<string, number>
+}
+
+export interface FinanceFundMovement {
+  account: string
+  date: string
+  reference: string
+  description: string
+  kind: string
+  amount: number
+}
+
 export interface DashboardData {
+  funds?: FinanceFund[]
+  openingFundAccounts?: FinanceOpeningAccount[]
+  approvedStaffReceipts?: number
   bankCreditCount: number
   bankDebitCount: number
   bankCredits: number

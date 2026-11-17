@@ -2,6 +2,7 @@ export const DONATION_CATEGORIES = [
   'General Donation',
   'Land Purchase',
   'Temple Construction',
+  'Books',
   'Deity Worship',
   'Annadanam / Food Distribution',
   'Festivals',
@@ -38,6 +39,8 @@ export const CONSTRUCTION_EXPENSE_CATEGORIES = [
 ] as const
 
 export const OPERATIONS_EXPENSE_CATEGORIES = [
+  'Books',
+  'General Donation',
   'Electricity',
   'Water',
   'Groceries',

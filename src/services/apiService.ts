@@ -16,6 +16,8 @@ import type {
   CollectionEntry,
   CollectionPlan,
   DashboardData,
+  FinanceFundMovement,
+  FinanceOpeningAccount,
   Donation,
   InstallmentPlan,
   EventVolunteer,
@@ -497,6 +499,14 @@ export const dataService = {
     demoInstallmentPlans = demoInstallmentPlans.map((plan) => plan.planID === planID ? { ...plan, lastReminderAt: new Date().toISOString() } : plan)
   },
 
+  getFinanceFundDetails(fund: string): Promise<FinanceFundMovement[]> {
+    return apiFetch('getFinanceFundDetails', {}, { fund })
+  },
+  saveFinanceOpeningFunds(account: FinanceOpeningAccount) {
+    return apiFetch('saveFinanceOpeningFunds', {}, {
+      accountID: account.id, opening: account.opening, allocations: account.allocations,
+    })
+  },
   async getDashboard(): Promise<DashboardData> {
     if (!CONFIG.useMockData && CONFIG.webAppUrl) {
       return apiFetch('getDashboardData') as Promise<DashboardData>

@@ -4,6 +4,8 @@ import {
   HandCoins,
   Receipt,
   Landmark,
+  Wallet,
+  HardHat,
   Plus,
   Pin,
   Heart,
@@ -28,7 +30,7 @@ import { StatCard, Card, CardHeader, Button, Modal, Badge } from '../components/
 import { formatCurrency, monthLabel, formatDateTime } from '../utils/helpers'
 import { DonationForm } from '../components/forms/DonationForm'
 import { ExpenseForm } from '../components/forms/ExpenseForm'
-import { CollectionReview } from './CollectionsPage'
+import { FinanceFunds } from '../components/FinanceFunds'
 import { CONFIG } from '../config/apiConfig'
 
 const labelFmt = (label: unknown) => monthLabel(String(label))
@@ -36,39 +38,64 @@ const labelFmt = (label: unknown) => monthLabel(String(label))
 const PIE_COLORS = ['#f97316', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#6366f1']
 
 export function DashboardPage() {
-  const { user, dashboard, can, settings, announcements, events, people, donations, communications } = useApp()
+  const { user, dashboard, accounts, can, settings, announcements, events, people, donations, communications } = useApp()
   const [showDonation, setShowDonation] = useState(false)
   const [showExpense, setShowExpense] = useState(false)
 
-  if (user?.role === 'admin' && !CONFIG.useMockData) {
+  if (user?.role === 'admin') {
+    const money = (amount: number | undefined) => amount == null ? '—' : formatCurrency(amount)
+    const liquidAccounts = accounts.filter((account) => ['bank', 'cash'].includes(account.type?.toLowerCase()))
+    const construction = dashboard?.funds?.find((fund) => fund.id === 'construction')
     return (
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Finance Dashboard</h1>
             <p className="mt-1 text-sm text-slate-500">{settings.templeName}</p>
           </div>
           <div className="flex flex-wrap gap-3 text-sm font-medium text-orange-700">
-            <Link className="hover:underline" to="/donations">Donations</Link>
-            <Link className="hover:underline" to="/installments">Installment plans</Link>
+            <Link className="hover:underline" to="/collections">Staff Collections Dashboard</Link>
             <Link className="hover:underline" to="/reports">Financial reports</Link>
           </div>
         </div>
-        {dashboard && (
-          <dl className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4 sm:grid-cols-3">
-            {[
-              ['Bank balance', dashboard.bankBalance],
-              ['Total donations', dashboard.totalDonations],
-              ['Total expenses', dashboard.totalExpenses],
-            ].map(([label, amount]) => (
-              <div key={label}>
-                <dt className="text-sm text-slate-500">{label}</dt>
-                <dd className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{formatCurrency(Number(amount))}</dd>
-              </div>
-            ))}
-          </dl>
+        {!dashboard && <p role="status" className="text-sm text-slate-600">Finance totals are unavailable. Reload to try again.</p>}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Money in bank" value={money(dashboard?.bankBalance)} icon={<Landmark size={20} />} color="blue" />
+          <StatCard label="Cash outside bank" value={money(dashboard?.cashBalance)} icon={<Wallet size={20} />} color="amber" sub="Includes recorded cash held by collectors" />
+          <StatCard label="Total spent" value={money(dashboard?.totalExpenses)} icon={<Receipt size={20} />} color="red" sub="Across all recorded spending" />
+          <StatCard label="Approved staff receipts" value={money(dashboard?.approvedStaffReceipts)} icon={<HandCoins size={20} />} color="teal" sub="Already included in bank or cash balances" />
+        </div>
+        <section className="space-y-3" aria-labelledby="construction-finance">
+          <h2 id="construction-finance" className="text-lg font-semibold text-slate-900">Temple construction</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatCard label="Received for construction" value={money(construction?.received ?? dashboard?.constructionDonations)} icon={<HandCoins size={20} />} color="green" sub="Includes approved staff collections" />
+            <StatCard label="Spent on construction" value={money(construction?.spent ?? dashboard?.totalConstructionExpenses)} icon={<HardHat size={20} />} color="orange" sub="Included in total spent" />
+          </div>
+        </section>
+        {dashboard?.funds ? <FinanceFunds /> : !CONFIG.useMockData && dashboard && (
+          <p className="text-sm text-slate-600">Deploy the updated Apps Script to view the bank and cash breakdown by fund.</p>
         )}
-        <CollectionReview dashboard />
+        {liquidAccounts.length > 0 && (
+          <Card>
+            <CardHeader title="Bank and cash accounts" action={<Link className="text-sm font-medium text-orange-700 hover:underline" to="/accounts">View accounts</Link>} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr><th scope="col" className="px-4 py-2">Account</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2 text-right">Current balance</th></tr>
+                </thead>
+                <tbody>
+                  {liquidAccounts.map((account) => (
+                    <tr key={account.accountID} className="border-t border-slate-100">
+                      <th scope="row" className="px-4 py-2 font-medium">{account.accountName}</th>
+                      <td className="px-4 py-2 capitalize">{account.type}</td>
+                      <td className="px-4 py-2 text-right font-medium tabular-nums">{money(account.currentBalance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
       </div>
     )
   }

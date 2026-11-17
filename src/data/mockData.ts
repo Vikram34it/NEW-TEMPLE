@@ -217,7 +217,7 @@ export function buildDashboardData(
     .map((t) => ({
       date: t.date,
       amount: t.amount,
-      category: isFixedDeposit(t.description) ? 'Fixed Deposit' : 'Other',
+      category: isFixedDeposit(t.description) ? 'Fixed Deposit' : t.bankCategory?.trim() || 'Other',
     }))
 
   const assetRows = [...recordRows, ...manualTxnRows].filter((e) => e.category === 'Fixed Deposit')

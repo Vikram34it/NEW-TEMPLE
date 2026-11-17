@@ -1,4 +1,5 @@
 import { Plus } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DataTable, type Column } from '../components/DataTable'
 import { CollectionPhotoScan } from '../components/CollectionPhotoScan'
@@ -36,6 +37,16 @@ function summary(details: CollectionDetails) {
 }
 
 export function CollectionsPage() {
+  const { user } = useApp()
+  if (user?.role === 'admin') {
+    return (
+      <div className="space-y-5">
+        <PageHeader title="Staff Collections Dashboard" subtitle="Collector activity, installment commitments, and approval history" />
+        <Link className="inline-block text-sm font-medium text-orange-700 hover:underline" to="/">Finance Dashboard</Link>
+        {CONFIG.useMockData ? <p className="text-sm text-slate-600">Connect the Apps Script backend to view staff collections.</p> : <CollectionReview dashboard />}
+      </div>
+    )
+  }
   if (CONFIG.useMockData) return <PageHeader title="Collections" subtitle="Connect the Apps Script backend to record collections." />
   return <LiveCollectionsPage />
 }
