@@ -1509,7 +1509,8 @@ function scanCollectionForm_(body) {
   if (!/^gemini-[a-z0-9.-]+$/.test(model)) throw new Error('The photo scanner model setting is invalid.');
   var response;
   try {
-    response = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
+    var options = {
       method: 'post',
       contentType: 'application/json',
       headers: { 'x-goog-api-key': key },
@@ -1518,7 +1519,13 @@ function scanCollectionForm_(body) {
         generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: properties } }
       }),
       muteHttpExceptions: true
-    });
+    };
+    var retryDelays = [1000, 2000];
+    response = UrlFetchApp.fetch(url, options);
+    for (var i = 0; i < retryDelays.length && response.getResponseCode() === 503; i++) {
+      Utilities.sleep(retryDelays[i]);
+      response = UrlFetchApp.fetch(url, options);
+    }
   } catch (err) {
     throw new Error('The photo scanner could not connect. Try again or enter the details manually.');
   }
