@@ -351,15 +351,22 @@ function roleColor(role: Role): 'green' | 'red' | 'amber' | 'blue' | 'orange' | 
 }
 
 function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: string }) {
-  const { recipient, password } = share
+  const { updateUser } = useApp()
+  const { recipient } = share
+  const [password, setPassword] = useState(share.password)
+  const [newPin, setNewPin] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [pinReset, setPinReset] = useState(false)
   const [phone, setPhone] = useState(() => String(recipient.phone ?? '').trim())
   const [summary, setSummary] = useState<{ count: number; total: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const isDonor = recipient.role === 'donor'
+  const isCollector = recipient.role === 'collector'
   const loginUrl = new URL(window.location.href)
   loginUrl.search = ''
   loginUrl.hash = isDonor ? '/login' : '/staff-login'
+  const signInLink = isCollector ? 'https://vikram34it.github.io/iskconmangalagiri/#/staff-login' : loginUrl.href
   const digits = phone.replace(/\D/g, '')
   const whatsappPhone = digits.length === 10 && !phone.trim().startsWith('+') ? '91' + digits : digits
   const validPhone = /^[1-9][0-9]{7,14}$/.test(whatsappPhone)
@@ -367,9 +374,13 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     `*Hare Krishna, ${recipient.name}!*`,
     '',
     `*${templeName} ${isDonor ? 'Donor' : 'Staff'} Portal*`,
-    `*Login link:* ${loginUrl.href}`,
-    isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`,
-    password ? `*Password:* ${password}` : `Use your current password${isDonor ? ' or PIN' : ''}.`,
+    `*Login link:* ${signInLink}`,
+    ...(isCollector
+      ? [`Select your name *${recipient.name}* from the dropdown list.`]
+      : [isDonor ? `*Login email:* ${recipient.email}` : `*Select your name:* ${recipient.name}\n*Email sign-in:* ${recipient.email}`]),
+    password
+      ? `*${isCollector && /^\d{4,6}$/.test(password) ? 'PIN' : 'Password'}:* ${password}`
+      : `Use your current password${isDonor || isCollector ? ' or PIN' : ''}.`,
     ...(summary ? [
       '',
       '*Your contribution summary*',
@@ -379,6 +390,23 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
     '',
     isDonor ? 'Sign in to view your donations and receipts. Thank you for your support!' : 'Thank you for your service!',
   ].join('\n')
+
+  const resetPin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (resetting || !/^\d{6}$/.test(newPin)) return
+    setError('')
+    setResetting(true)
+    try {
+      await updateUser({ userID: recipient.userID, password: newPin })
+      setPassword(newPin)
+      setNewPin('')
+      setPinReset(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reset the collector PIN.')
+    } finally {
+      setResetting(false)
+    }
+  }
 
   const toggleSummary = async () => {
     setError('')
@@ -406,11 +434,26 @@ function LoginShareForm({ share, templeName }: { share: LoginShare; templeName: 
           {loading ? 'Loading summary…' : summary ? 'Remove contribution summary' : 'Include contribution summary'}
         </Button>
       )}
+      {isCollector && !password && (
+        <details className="rounded-lg border border-slate-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium">Reset PIN for this collector</summary>
+          <form className="mt-3 space-y-3" onSubmit={resetPin}>
+            <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
+              <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
+                required disabled={resetting} value={newPin} onChange={(e) => setNewPin(e.target.value)} />
+            </Field>
+            <Button type="submit" disabled={resetting || !/^\d{6}$/.test(newPin)}>
+              {resetting ? 'Saving PIN…' : 'Reset PIN and update draft'}
+            </Button>
+          </form>
+        </details>
+      )}
+      {pinReset && <p role="status" className="text-sm text-emerald-700">New PIN saved and added to the draft.</p>}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <Field label="Message preview"><Textarea rows={11} readOnly value={message} /></Field>
       <p className="text-sm text-slate-600">Verify the recipient’s number before sending in WhatsApp.</p>
       <div className="flex justify-end">
-        <Button disabled={!validPhone} onClick={() => window.open(
+        <Button disabled={!validPhone || resetting} onClick={() => window.open(
           `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer'
         )}>Open WhatsApp draft</Button>
       </div>

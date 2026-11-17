@@ -151,7 +151,7 @@ interface AppContextValue {
   updateAccount: (a: Pick<Account, 'accountID' | 'openingBalance'>) => Promise<void>
 
   addUser: (u: Omit<User, 'userID' | 'createdDate'>) => Promise<User>
-  updateUser: (u: User) => Promise<void>
+  updateUser: (u: Partial<User> & Pick<User, 'userID'>) => Promise<void>
   deleteUser: (id: string) => Promise<void>
 
   addTransaction: (t: Omit<Transaction, 'transactionID'>) => Promise<Transaction>
@@ -947,7 +947,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     audit('Create', 'Users', id)
     return nu
   }
-  async function updateUser(u: User): Promise<void> {
+  async function updateUser(u: Partial<User> & Pick<User, 'userID'>): Promise<void> {
     if (CONFIG_USE_LIVE) {
       try {
         await dataService.persist('users', 'update', u)
