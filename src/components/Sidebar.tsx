@@ -12,7 +12,6 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Building2 as TempleIcon,
   X,
   Megaphone,
   Mail,
@@ -64,9 +63,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }`}
       >
         <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-800">
-          <div className="w-9 h-9 rounded-lg bg-orange-600 flex items-center justify-center text-white">
-            <TempleIcon size={20} />
-          </div>
+          <img src={import.meta.env.BASE_URL + "iskcon-mangalagiri.png"} alt="" className="h-11 w-11 shrink-0 rounded-lg bg-white p-1 object-contain" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-white truncate">{useAppSafe().settings.templeName}</p>
             <p className="text-[11px] text-slate-400">Management System</p>

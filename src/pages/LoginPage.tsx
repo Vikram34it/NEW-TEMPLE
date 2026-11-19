@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Signature, Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
+import { Eye, EyeOff, AlertCircle, UserPlus } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { homePathForRole } from '../navigation'
 import { CONFIG } from '../config/apiConfig'
@@ -81,9 +81,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
       )}
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
-          <div className="inline-flex w-16 h-16 rounded-2xl bg-orange-600 items-center justify-center text-white mb-3">
-            <Signature size={32} />
-          </div>
+          <img src={import.meta.env.BASE_URL + "iskcon-mangalagiri.png"} alt="ISKCON Mangalagiri" className="mx-auto mb-3 h-24 w-24 object-contain" />
           <h1 className="text-2xl font-bold text-slate-800">{isCollectorPortal ? 'ISKCON Collector' : 'Temple Management'}</h1>
           <p className="text-slate-500 text-sm mt-1">{staff ? 'Staff and Admin Login' : 'Donor Login'}</p>
         </div>
