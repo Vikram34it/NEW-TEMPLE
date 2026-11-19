@@ -460,6 +460,9 @@ export const dataService = {
     return apiFetch('receiveCollectionMaterials', {}, { id, date, site })
   },
 
+  changeDonorPin(current: string, pin: string) {
+    return apiFetch('changeDonorPin', {}, { current, pin })
+  },
   requestDonorOtp(email: string) {
     return apiFetch('requestDonorOtp', {}, { email })
   },

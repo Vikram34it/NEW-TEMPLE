@@ -1,3 +1,4 @@
+import { dataService } from '../services/apiService'
 import { useState } from 'react'
 import { Receipt, Wallet, HeartHandshake, CalendarDays, TrendingUp } from 'lucide-react'
 import { useApp } from '../context/AppContext'
@@ -9,9 +10,10 @@ import { formatCurrency, formatDate } from '../utils/helpers'
 import type { Donation } from '../types'
 
 export function MyDonationsPage() {
-  const { user, donations, settings } = useApp()
+  const { user, donations, settings, logout } = useApp()
   const [receiptDonation, setReceiptDonation] = useState<Donation | null>(null)
 
+  const [pinError, setPinError] = useState('')
   const mine = user?.role === 'donor' ? donations : []
   const total = mine.reduce((s, d) => s + d.amount, 0)
   const firstDate = mine.length ? new Date(Math.min(...mine.map((d) => new Date(d.date).getTime()))) : null
@@ -35,6 +37,22 @@ export function MyDonationsPage() {
         subtitle={`Welcome, ${user?.name} — you have made ${mine.length} donation${mine.length === 1 ? '' : 's'} totalling ${formatCurrency(total)}`}
       />
 
+      {user?.role === 'donor' && <details className="bg-white rounded-lg p-4">
+        <summary>Change my PIN</summary>
+        <form className="grid gap-3 mt-3" onSubmit={async (event) => {
+          event.preventDefault()
+          const fields = new FormData(event.currentTarget)
+          try {
+            await dataService.changeDonorPin(String(fields.get('current')), String(fields.get('pin')))
+            logout()
+          } catch (error) { setPinError(error instanceof Error ? error.message : 'Could not change PIN.') }
+        }}>
+          <label>Current password or PIN <input name="current" type="password" autoComplete="current-password" required /></label>
+          <label>New four-digit PIN <input name="pin" type="password" inputMode="numeric" pattern="[0-9]{4}" autoComplete="new-password" required /></label>
+          {pinError && <p role="alert">{pinError}</p>}
+          <Button type="submit">Save PIN and sign out</Button>
+        </form>
+      </details>}
       {mine.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Donated" value={formatCurrency(total)} icon={<Wallet size={20} />} color="orange" />

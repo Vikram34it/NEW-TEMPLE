@@ -154,9 +154,7 @@ function getResetKey_() {
  * password for the app's "Reset All Transactions" button in Settings. */
 function getResetKeyNow() {
   var key = getResetKey_();
-  try {
-    SpreadsheetApp.getUi().alert('Reset Key (keep secret):\n\n' + key);
-  } catch (e) { throw new Error('Open the bound spreadsheet before viewing the reset key.'); }
+  Logger.log('Reset Key (keep secret): ' + key);
   return key;
 }
 
@@ -273,6 +271,7 @@ var WRITE_ROLES_ = Object.create(null);
   ['admin accountant manager', 'createAnnouncement updateAnnouncement archiveAnnouncement createEvent updateEvent deleteEvent createVolunteer updateVolunteer removeVolunteer createRequest updateRequest deleteRequest createCommunication updateCommunication deleteCommunication sendDonorEmail sendBulkEmails sendBulkSms sendBulkWhatsApp logBulkCommunications scheduleBulkCampaign cancelBulkCampaign'],
   ['admin manager', 'createPerson importDonorProfiles updatePerson deletePerson createVendor updateVendor deleteVendor'],
   ['admin accountant', 'createDonation bulkCreateDonations bulkLinkDonorReceipts linkTransactionsToPerson updateDonation createInstallmentPlan linkInstallmentPayment recordInstallmentReminder createExpense updateExpense softDeleteDonation softDeleteExpense resyncLedger'],
+  ['donor', 'changeDonorPin'],
   ['admin collector', 'submitCollection'],
   ['admin', 'reviewCollection cancelCollection recordCollectionHandover receiveCollectionMaterials'],
   ['admin', 'bulkCreateExpenses createProject updateProject createPayment updatePayment createAccount updateAccount createUser updateUser deleteUser createTransaction bulkCreateTransactions clearBankTransactions resetAllTransactionsPreview resetAllTransactions updateSettings saveFinanceOpeningFunds'],
@@ -537,6 +536,16 @@ function route_(action, params, body, user) {
       return createdUser;
       prepareUserWrite_(body.record, true);
       createRecord_(CONFIG.sheetNames.users, HEADERS.users, body.record, 'USR-', 'user', ['Name', 'Email', 'Password']);
+      return { success: true };
+    case 'changeDonorPin':
+      if (typeof body.pin !== 'string' || !/^\d{4}$/.test(body.pin)) throw new Error('Enter four digits.');
+      var stored = String(user.Password), supplied = String(body.current || '');
+      if (stored.indexOf('hmac-v1:') === 0) supplied = passwordVerifier_(supplied, stored.split(':')[1]);
+      if (digest_(supplied) !== digest_(stored)) throw new Error('Current password or PIN is incorrect.');
+      var list = tableData_(CONFIG.sheetNames.users, HEADERS.users);
+      var idx = list.findIndex(function (r) { return r.UserID === user.UserID; });
+      if (idx < 0) throw new Error('Account unavailable.');
+      sheet_(CONFIG.sheetNames.users).getRange(idx + 2, HEADERS.users.indexOf('Password')+1).setValue(passwordVerifier_(body.pin, randomToken_()));
       return { success: true };
     case 'updateUser':
       prepareUserWrite_(body.record, false);
@@ -1385,12 +1394,21 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
     rows.push(row);
   }
 
+  var donorSync = null;
+  if (module === 'donation' && hasBankRows) {
+    donorSync = syncBankDonors_(data, accepted);
+    var donorColumn = headers.indexOf('DonorID');
+    accepted.forEach(function (receipt, index) { rows[index][donorColumn] = receipt.DonorID || ''; });
+  }
+
   // 3. Append all rows at once (single spreadsheet write instead of N writes).
   if (rows.length > 0) {
     var startRow = sheet.getLastRow() + 1;
     ensureRowCapacity_(sheet, startRow + rows.length - 1);
     sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
   }
+
+
 
   // 4. Audit log: write all entries in batch.
   try {
@@ -1417,7 +1435,7 @@ function bulkCreateRecords_(sheetName, headers, records, prefix, module, require
   if (isBalanceSheet_(sheetName)) resyncLedger_();
 
   // Return the created records with their IDs
-  return { created: accepted.length, skipped: records.length - accepted.length, prefix: prefix };
+  return { created: accepted.length, skipped: records.length - accepted.length, donorSync: donorSync, prefix: prefix };
 }
 
 
@@ -2309,6 +2327,86 @@ function importDonorProfiles_() {
   return bulkCreateRecords_(CONFIG.sheetNames.people, HEADERS.people, records, 'PER-', 'person', ['Name']);
 }
 
+function syncBankDonorLogins() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { return syncBankDonors_(); }
+  finally { SpreadsheetApp.flush(); lock.releaseLock(); }
+}
+
+function syncBankDonors_(existingReceipts, incomingReceipts) {
+  var people = tableData_(CONFIG.sheetNames.people, HEADERS.people);
+  var users = tableData_(CONFIG.sheetNames.users, HEADERS.users);
+  var saved = existingReceipts || tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var receipts = saved.concat(incomingReceipts || []);
+  var profiles = [], accounts = [], links = [], accountLinks = [];
+  function key(value) { return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+  receipts.forEach(function (d, i) {
+    var name = key(d.DonorName);
+    if (!d.BankImportKey || !notDeleted_(d) || !name || /^(unknown( donor)?|anonymous( donor)?|n\/a|-)$/.test(name)) return;
+    var namedUsers = users.filter(function (u) { return u.Role === 'donor' && key(u.Name) === name; });
+    if (!d.DonorID && namedUsers.length > 1) return;
+    var namedUser = namedUsers.length === 1 ? namedUsers[0] : null;
+    var claimedID = namedUser && namedUser.DonorPersonID;
+    var matches = people.filter(function (p) {
+      if (d.DonorID) return p.PersonID === d.DonorID;
+      return /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(p.PersonType)) &&
+        (key(p.Name) === name || p.PersonID === claimedID);
+    });
+    if (!d.DonorID && claimedID && !matches.some(function (p) { return p.PersonID === claimedID; })) return;
+    if (matches.length > 1 || (d.DonorID && !matches.length)) return;
+    var person = matches[0];
+    if (person && (key(person.Status) !== 'active' || !/(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(person.PersonType))) return;
+    if (!person) {
+      person = { PersonID: 'PER-' + Utilities.getUuid(), Name: String(d.DonorName).trim(), PersonType: 'Donor', Status: 'active', JoinDate: new Date() };
+      profiles.push(person); people.push(person);
+    }
+    var related = users.filter(function (u) {
+      return u.DonorPersonID === person.PersonID || (u.Role === 'donor' && !u.DonorPersonID && (key(u.Name) === name ||
+        person.Phone && normalizePhone_(person.Phone) === normalizePhone_(u.Phone) ||
+        person.Email && key(person.Email) === key(u.Email)));
+    });
+    if (!related.length) {
+      var account = { UserID: 'D-' + Utilities.getUuid().slice(0, 13), Name: person.Name,
+        CreatedDate: new Date(), Role: 'donor', Status: 'active', DonorPersonID: person.PersonID,
+        Password: String(1000 + parseInt(Utilities.getUuid().slice(0, 8), 16) % 9000) };
+      users.push(account); accounts.push(account);
+    } else if (related.length === 1 && !related[0].DonorPersonID) {
+      var u = related[0];
+      var conflictingContact = person.Email && u.Email && key(person.Email) !== key(u.Email) ||
+        person.Phone && u.Phone && normalizePhone_(person.Phone) !== normalizePhone_(u.Phone);
+      var uniqueName = namedUser === u && people.filter(function (p) {
+        return key(p.Name) === name && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(p.PersonType));
+      }).length === 1;
+      if (!conflictingContact && (uniqueName || person.Email && key(person.Email) === key(u.Email) ||
+          person.Phone && normalizePhone_(person.Phone) === normalizePhone_(u.Phone))) {
+        accountLinks.push([users.indexOf(u) + 2, person.PersonID]);
+        u.DonorPersonID = person.PersonID;
+      }
+    }
+    if (!d.DonorID) {
+      if (i < saved.length) links.push([i + 2, person.PersonID]);
+      else d.DonorID = person.PersonID;
+    }
+  });
+  function append(key, rows) {
+    if (!rows.length) return;
+    var sheet = sheet_(CONFIG.sheetNames[key]), start = sheet.getLastRow() + 1;
+    ensureRowCapacity_(sheet, start + rows.length - 1);
+    sheet.getRange(start, 1, rows.length, HEADERS[key].length).setValues(rows.map(function (r) {
+      return HEADERS[key].map(function (h) { return sheetValue_(r[h] || ''); });
+    }));
+  }
+  append('people', profiles); append('users', accounts);
+  var userSheet = sheet_(CONFIG.sheetNames.users);
+  accountLinks.forEach(function (link) {
+    userSheet.getRange(link[0], HEADERS.users.indexOf('DonorPersonID') + 1).setValue(link[1]);
+  });
+  var sheet = sheet_(CONFIG.sheetNames.donations), col = HEADERS.donations.indexOf('DonorID')+1;
+  links.forEach(function (link) { sheet.getRange(link[0], col).setValue(link[1]); });
+  return { linked: links.length, peopleCreated: profiles.length, usersCreated: accounts.length };
+}
+
 function linkImportedDonor_(record, people) {
   var person = people.find(function (p) { return String(p.PersonID) === String(record.DonorID) && /(?:^|[,;])\s*donor\s*(?:$|[,;])/i.test(String(p.PersonType)); });
   if (record.DonorID && !person) throw new Error('Linked donor profile no longer exists');
@@ -2652,10 +2750,17 @@ function login_(body) {
   var digits = /^[+()0-9 .-]+$/.test(identifier) ? normalizePhone_(identifier) : '';
   var staff = body.staff === true;
   var users = readAll_(CONFIG.sheetNames.users, HEADERS.users);
+  var profiles = new Map();
+  if (!staff) readAll_(CONFIG.sheetNames.people, HEADERS.people).forEach(function (person) {
+    profiles.set(String(person.PersonID), person);
+  });
   var matches = users.filter(function (user) {
     if (staff && !staffLoginRole_(user.Role)) return false;
+    var person = user.Role === 'donor' && profiles.get(String(user.DonorPersonID));
+    var email = user.Email || (person && person.Email) || '';
+    var phone = user.Phone || (person && person.Phone) || '';
     return (staff && String(user.UserID).toLowerCase() === identifier) ||
-      String(user.Email).trim().toLowerCase() === identifier || (digits && normalizePhone_(user.Phone) === digits);
+      String(email).trim().toLowerCase() === identifier || (digits && normalizePhone_(phone) === digits);
   });
   var failureKey = 'login:' + digest_(matches.length === 1 ? String(matches[0].UserID) : (digits || identifier));
   if (Number(cache.get(failureKey)) >= 8 || Number(cache.get('login:all')) >= 100) {

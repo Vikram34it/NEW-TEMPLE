@@ -105,7 +105,10 @@ export function BankStatementPage() {
           const occurrence = (occurrences.get(identity) ?? 0) + 1
           occurrences.set(identity, occurrence)
           const phone = normalizePhone(r.donorPhone || '')
-          const matches = phone ? donors.filter((donor) => normalizePhone(donor.phone) === phone) : []
+          const nameKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase()
+          const name = nameKey(r.donorName || '')
+          const byName = name ? donors.filter((donor) => nameKey(donor.name) === name) : []
+          const matches = name ? byName : phone ? donors.filter((donor) => normalizePhone(donor.phone) === phone) : []
           return {
             ...r,
             category: bankPurpose(r.type, (r.type === 'income' ? r.purpose : r.remark) || '', r.description, Boolean(r.donorName || phone)),
@@ -413,7 +416,7 @@ export function BankStatementPage() {
                           <>
                             {r.donorName && <div className="text-xs mb-1">{r.donorName}</div>}
                             {!isBankOnlyCategory(r.category) && <Select aria-label="Link donor profile" value={r.donorID} onChange={(e) => changeRow(r.key, { donorID: e.target.value })}>
-                              <option value="">Unlinked</option>
+                              <option value="">{r.donorName ? "Auto-link by name on import" : "Unlinked"}</option>
                               {donors.map((donor) => <option key={donor.personID} value={donor.personID}>{donor.name}{donor.phone ? ' · ' + donor.phone : ''}</option>)}
                             </Select>}
                           </>

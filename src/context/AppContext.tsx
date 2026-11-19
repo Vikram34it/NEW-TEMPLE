@@ -509,8 +509,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!items.length) return []
     try {
       if (CONFIG_USE_LIVE) {
-        const result = await dataService.bulkPersist('donations', items as Array<Record<string, unknown>>) as { created: number; skipped: number }
-        notify('success', bulkSaveMessage('donations', result.created, result.skipped))
+        const result = await dataService.bulkPersist('donations', items as Array<Record<string, unknown>>) as {
+          created: number; skipped: number; donorSync?: { peopleCreated: number; usersCreated: number }
+        }
+        const summary = bulkSaveMessage('donations', result.created, result.skipped)
+        if (items.some(item => item.bankImportKey) && !result.donorSync) {
+          notify('error', summary + ' Update the Apps Script deployment and run syncBankDonorLogins to finish donor linking.')
+        } else {
+          const counts = result.donorSync
+          notify('success', counts ? summary + ' New People profiles: ' + counts.peopleCreated + '. New donor logins: ' + counts.usersCreated + '.' : summary)
+        }
         await refreshAllSafe()
         return []
       }

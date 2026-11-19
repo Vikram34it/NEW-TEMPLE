@@ -99,7 +99,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
             {activationNotice && <p role="status" className="text-sm text-emerald-700">{activationNotice}</p>}
             {isDonorMode && (
               <p className="text-xs text-slate-500 bg-orange-50 border border-orange-200 rounded-lg p-2.5">
-                Sign in with your registered mobile number or email to view your donations and receipts.
+                Sign in with your mobile number or email to view your donations and receipts.
               </p>
             )}
             {staff && !useEmail ? (
@@ -112,7 +112,7 @@ export function LoginPage({ staff = false }: { staff?: boolean }) {
                 </Select>
               </Field>
             ) : (
-              <Field label={isDonorMode ? 'Mobile Number or Email' : 'Email'} required>
+              <Field label={isDonorMode ? 'Mobile number or email' : 'Email'} required>
                 <Input
                   type={isDonorMode ? 'text' : 'email'}
                   value={email}
