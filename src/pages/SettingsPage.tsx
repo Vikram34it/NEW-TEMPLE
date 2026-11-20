@@ -277,7 +277,7 @@ export function SettingsPage() {
           actions={(u) => can('*') && (
             <div className="flex flex-wrap gap-1 justify-end">
               {u.status === 'active' && <Button size="sm" variant="secondary" onClick={() => setLoginShare({ recipient: u })}>Share login</Button>}
-              {u.role === 'collector' && (
+              {(u.role === 'collector' || u.role === 'donor') && (
                 <Button size="sm" variant="secondary" onClick={() => setPinRecipient(u)}>Reset PIN</Button>
               )}
               <button onClick={() => setEditUser(u)} className="p-1.5 rounded-lg hover:bg-orange-50 text-orange-600" title="Edit"><Pencil size={15} /></button>
@@ -342,7 +342,7 @@ export function SettingsPage() {
 
       {pinRecipient && can('*') && (
         <Modal open onClose={() => setPinRecipient(null)} title={`Reset PIN for ${pinRecipient.name}`}>
-          <CollectorPinForm recipient={pinRecipient} onDone={() => setPinRecipient(null)} onShare={(pin) => {
+          <UserPinForm recipient={pinRecipient} onDone={() => setPinRecipient(null)} onShare={(pin) => {
             setLoginShare({ recipient: pinRecipient, password: pin })
             setPinRecipient(null)
           }} />
@@ -476,13 +476,13 @@ function LoginShareForm({ share, templeName, onResetPin }: { share: LoginShare; 
   )
 }
 
-function CollectorPinForm({ recipient, onDone, onShare }: { recipient: User; onDone: () => void; onShare: (pin: string) => void }) {
+function UserPinForm({ recipient, onDone, onShare }: { recipient: User; onDone: () => void; onShare: (pin: string) => void }) {
   const { updateUser } = useApp()
   const [newPin, setNewPin] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
-  const validPin = /^\d{6}$/.test(newPin)
+  const validPin = /^\d{4}$/.test(newPin)
 
   const resetPin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -493,7 +493,7 @@ function CollectorPinForm({ recipient, onDone, onShare }: { recipient: User; onD
       await updateUser({ userID: recipient.userID, password: newPin })
       setSaved(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reset the collector PIN.')
+      setError(err instanceof Error ? err.message : 'Could not reset the PIN.')
     } finally {
       setSaving(false)
     }
@@ -509,8 +509,8 @@ function CollectorPinForm({ recipient, onDone, onShare }: { recipient: User; onD
           </Field>
         </>
       ) : (
-        <Field label="New 6-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
-          <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{6}" maxLength={6}
+        <Field label="New 4-digit PIN" hint="Saving replaces the collector’s current sign-in credential.">
+          <Input type="password" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{4}" maxLength={4}
             required disabled={saving} value={newPin} onChange={(event) => setNewPin(event.target.value)} />
         </Field>
       )}
@@ -569,8 +569,8 @@ function UserForm({ initial, onDone, onShare }: { initial?: Partial<User>; onDon
       <Field label="Mobile Number" hint="For bank donations, use the verified mobile number on the donor profile.">
         <Input value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 9845012345" />
       </Field>
-      <Field label="Password" required={!initial?.userID} hint={initial?.userID ? 'Use at least ' + minimum + ' characters, or leave blank to keep the current password.' : 'Use at least ' + minimum + ' characters.'}>
-        <Input type="password" autoComplete="new-password" minLength={minimum} maxLength={256} value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!initial?.userID} />
+      <Field label="Password or PIN" required={!initial?.userID} hint={initial?.userID ? 'Use a 4-digit PIN or a password of at least ' + minimum + ' characters, or leave blank to keep the current password.' : 'Use a 4-digit PIN or a password of at least ' + minimum + ' characters.'}>
+        <Input type="password" autoComplete="new-password" pattern={'[0-9]{4}|.{' + minimum + ',256}'} maxLength={256} value={form.password || ''} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!initial?.userID} />
       </Field>
       <Field label="Role">
         <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>

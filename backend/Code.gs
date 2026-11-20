@@ -2623,8 +2623,8 @@ function prepareUserWrite_(record, creating) {
   }
   var minimum = shortStaffPasswordRole_(role) ? 4 : 12;
   if (record.Password !== undefined) {
-    if (typeof record.Password !== 'string' || record.Password.trim().length < minimum || record.Password.length > 256 || isSeedPassword_(record.Password)) {
-      throw new Error('Choose a password between ' + minimum + ' and 256 characters. Avoid demo passwords.');
+    if (typeof record.Password !== 'string' || (record.Password.trim().length < minimum && !/^\d{4}$/.test(record.Password)) || record.Password.length > 256 || isSeedPassword_(record.Password)) {
+      throw new Error('Choose a 4-digit PIN or a password between ' + minimum + ' and 256 characters. Avoid demo passwords.');
     }
     record.Password = passwordVerifier_(record.Password, randomToken_());
   }
@@ -2705,8 +2705,8 @@ function activateDonor_(body) {
   var email = activationEmail_(body.email);
   var code = String(body.code || '').trim();
   var password = body.password;
-  if (typeof password !== 'string' || (password.length < 8 && !/^[0-9]{6}$/.test(password)) || password.length > 256 || isSeedPassword_(password)) {
-    throw new Error('Choose a 6-digit PIN or a password between 8 and 256 characters.');
+  if (typeof password !== 'string' || (password.length < 8 && !/^(?:[0-9]{4}|[0-9]{6})$/.test(password)) || password.length > 256 || isSeedPassword_(password)) {
+    throw new Error('Choose a 4-digit PIN or a password between 8 and 256 characters.');
   }
   var cache = CacheService.getScriptCache();
   var key = 'donor-email-otp:' + digest_(email);
