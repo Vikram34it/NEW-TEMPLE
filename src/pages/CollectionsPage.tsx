@@ -841,7 +841,7 @@ export function CollectionReview({ dashboard = false }: { dashboard?: boolean })
             <Button variant="secondary" onClick={() => setSelected(row.entry)}>View latest collection</Button>
           )} />}
           {!commitmentRows && filtered.length > 0 && <CollectionTable key={view + query.trim()} rows={filtered} admin history={view === 'approved'} actions={(row) => (
-            <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : 'View'}</Button>
+            <Button variant="secondary" onClick={() => setSelected(row)}>{row.status === 'Pending review' ? 'Review' : row.status === 'Approved' && row.details.kind !== 'materials' && row.details.method !== 'Cash' ? 'View / correct payment' : 'View'}</Button>
           )} />}
         </>
       )}
@@ -954,8 +954,11 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   const [date, setDate] = useState(todayStr)
   const [reference, setReference] = useState('')
   const [paymentSource, setPaymentSource] = useState('')
+  const postedReceipt = donations.find(d => d.collectionID === row.id)
+  const linkedBankReceipt = postedReceipt?.bankImportKey ? postedReceipt : undefined
+  const receiptAccount = pending ? accountID : postedReceipt?.accountID || accountID
   const imported = donations.filter(d => d.bankImportKey && !d.deleted && !d.collectionID &&
-    d.accountID === accountID && Number(d.amount) === Number(data.amount) &&
+    d.accountID === receiptAccount && Number(d.amount) === Number(data.amount) &&
     (!d.donorID || d.donorID === data.donorID) && (!d.installmentPlanID || d.installmentPlanID === data.planID))
   const [confirmed, setConfirmed] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -980,6 +983,20 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
 
   return (
     <div className="space-y-4">
+      {!materials && !cash && (pending || row.status === 'Approved') && (
+        <Field label={pending ? 'How was this payment recorded?' : 'Correct a payment counted twice'}>
+          {linkedBankReceipt ? <p>Already linked to bank receipt {linkedBankReceipt.receiptNumber}.</p>
+            : !pending && !imported.length ? <p>No eligible imported receipt for {formatCurrency(Number(data.amount))}. Check the bank receipt in Donations for its donor, account, amount and any existing commitment link.</p>
+            : <>
+          <Select value={paymentSource} onChange={e => { setPaymentSource(e.target.value); setConfirmed(false) }}>
+            <option value="">Select payment record</option>
+            {imported.map(d => <option key={d.donationID} value={d.donationID}>{formatDate(d.date)} · {d.donorName} · {formatCurrency(d.amount)} · {d.transactionReference || d.receiptNumber}</option>)}
+            {pending && <option value="new">New bank payment</option>}
+          </Select>
+          {!pending && <Button disabled={busy || !paymentSource} onClick={() => save(() => dataService.reviewCollection(row.id, 'Approved', '', accountID, true, paymentSource))}>Replace duplicate with selected bank receipt</Button>}
+          </>}
+        </Field>
+      )}
       <CollectionRecordDetails row={row} />
       {row.status !== 'Cancelled' && <CollectionMessage row={row} />}
       {((pending && !materials && !cash) || handover) && (
@@ -988,16 +1005,6 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
             <option value="">Select account</option>
             {choices.map((account) => <option key={account.accountID} value={account.accountID}>{account.accountName}</option>)}
           </Select>
-        </Field>
-      )}
-      {!materials && !cash && (pending || (row.status === 'Approved' && imported.length > 0 && !donations.some(d => d.collectionID === row.id && d.bankImportKey))) && (
-        <Field label={pending ? 'How was this payment recorded?' : 'Correct a payment counted twice'}>
-          <Select value={paymentSource} onChange={e => { setPaymentSource(e.target.value); setConfirmed(false) }}>
-            <option value="">Select payment record</option>
-            {imported.map(d => <option key={d.donationID} value={d.donationID}>{formatDate(d.date)} · {d.donorName} · {formatCurrency(d.amount)} · {d.transactionReference || d.receiptNumber}</option>)}
-            {pending && <option value="new">New bank payment</option>}
-          </Select>
-          {!pending && <Button disabled={busy || !paymentSource} onClick={() => save(() => dataService.reviewCollection(row.id, 'Approved', '', accountID, true, paymentSource))}>Replace duplicate with selected bank receipt</Button>}
         </Field>
       )}
       {pending && !materials && !cash && <label className="flex gap-2 text-sm">
