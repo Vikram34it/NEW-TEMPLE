@@ -1952,7 +1952,10 @@ function cashWithCollectors_() {
 function reviewCollection_(body, user) {
   var row = collectionRows_().find(function (entry) { return entry.CollectionID === body.id; });
   if (!row) throw new Error('Collection not found.');
-  if (row.Status === 'Approved' && body.decision === 'Approved') return { id: row.CollectionID };
+  if (row.Status === 'Approved' && body.decision === 'Approved') {
+    if (body.importedReceiptID) reconcileApprovedReceipt_(row, body.importedReceiptID);
+    return { id: row.CollectionID };
+  }
   if (row.Status !== 'Pending review') throw new Error('This collection is no longer pending.');
   var decision = body.decision;
   var note = collectionText_(body.note, 1000);
@@ -1977,6 +1980,11 @@ function reviewCollection_(body, user) {
         var bankMovement = readAll_(CONFIG.sheetNames.transactions, HEADERS.transactions).some(function (t) {
           return t.BankImportKey && t.IncomeOrExpense === 'income' && String(t.ReferenceID).trim().toLowerCase() === ref;
         });
+        if (body.importedReceiptID) {
+          var selected = donations.find(function (d) { return d.DonationID === body.importedReceiptID && notDeleted_(d); });
+          if (!selected || matched.some(function (d) { return d !== selected; })) throw new Error('The selected receipt conflicts with the payment reference.');
+          matched = [selected];
+        }
         if (bankMovement || matched.length > 1) throw new Error('This reference needs bank reconciliation before approval.');
         if (matched.length) {
           var existing = matched[0];
@@ -2015,6 +2023,34 @@ function reviewCollection_(body, user) {
     DonationID: receipt ? receipt.DonationID : '', Details: JSON.stringify(data) });
   audit_('collections', decision, row.CollectionID, '', '');
   return { id: row.CollectionID };
+}
+
+function reconcileApprovedReceipt_(row, id) {
+  var data = JSON.parse(row.Details);
+  if (data.kind === 'materials' || data.method === 'Cash') throw new Error('Choose a bank payment.');
+  var rows = tableData_(CONFIG.sheetNames.donations, HEADERS.donations);
+  var original = rows.find(function (d) { return d.DonationID === id; });
+  var duplicate = rows.find(function (d) { return d.DonationID === row.DonationID; });
+  if (!original || !original.BankImportKey || !notDeleted_(original)) throw new Error('Choose an active imported receipt.');
+  if (original === duplicate && original.CollectionID === row.CollectionID) return;
+  if (!duplicate || duplicate.BankImportKey || (duplicate.CollectionID !== row.CollectionID && !(original.CollectionID === row.CollectionID && !duplicate.CollectionID && !notDeleted_(duplicate))) ||
+      original.Amount * 100 !== duplicate.Amount * 100 || original.AccountID !== duplicate.AccountID ||
+      (original.CollectionID && original.CollectionID !== row.CollectionID) ||
+      (original.DonorID && original.DonorID !== duplicate.DonorID) ||
+      (original.InstallmentPlanID && original.InstallmentPlanID !== duplicate.InstallmentPlanID)) {
+    throw new Error('The bank receipt must match the donor, account and amount and be available for this commitment.');
+  }
+  var donor = collectionPerson_(duplicate.DonorID);
+  if (!donor) throw new Error('The donor profile is unavailable.');
+  data.planID = duplicate.InstallmentPlanID;
+  postCollectionDonation_(row, data, donor, { AccountID: duplicate.AccountID }, original, rows);
+  var sheet = sheet_(CONFIG.sheetNames.donations);
+  var index = rows.indexOf(duplicate) + 2;
+  sheet.getRange(index, HEADERS.donations.indexOf('Deleted') + 1).setValue('TRUE');
+  resyncLedger_();
+  sheet.getRange(index, HEADERS.donations.indexOf('CollectionID') + 1).clearContent();
+  updateCollection_(row, { DonationID: original.DonationID });
+  audit_('collections', 'Reconcile imported receipt', row.CollectionID, duplicate.DonationID, original.DonationID);
 }
 
 function enrollCollectionDonor_(data, id) {

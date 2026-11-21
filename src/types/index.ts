@@ -51,6 +51,7 @@ export interface InstallmentPlan {
 }
 
 export interface Donation {
+  collectionID?: string
   installmentPlanID?: string
   accountID?: string
   bankImportKey?: string

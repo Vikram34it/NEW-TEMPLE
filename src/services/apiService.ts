@@ -447,8 +447,8 @@ export const dataService = {
   submitCollection(id: string, details: CollectionDetails) {
     return apiFetch('submitCollection', {}, { id, details })
   },
-  reviewCollection(id: string, decision: CollectionEntry['status'], note: string, accountID: string, confirmBankCredit: boolean) {
-    return apiFetch('reviewCollection', {}, { id, decision, note, accountID, confirmBankCredit })
+  reviewCollection(id: string, decision: CollectionEntry['status'], note: string, accountID: string, confirmBankCredit: boolean, importedReceiptID?: string) {
+    return apiFetch('reviewCollection', {}, { id, decision, note, accountID, confirmBankCredit, importedReceiptID })
   },
   recordCollectionHandover(id: string, accountID: string, accountType: string, date: string, reference: string) {
     return apiFetch('recordCollectionHandover', {}, { id, accountID, accountType, date, reference })

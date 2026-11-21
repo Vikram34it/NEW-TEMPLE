@@ -940,7 +940,7 @@ function CollectionMessage({ row }: { row: CollectionEntry }) {
 }
 
 function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: () => Promise<void> }) {
-  const { accounts } = useApp()
+  const { accounts, donations } = useApp()
   const data = row.details
   const pending = row.status === 'Pending review'
   const materials = data.kind === 'materials'
@@ -953,6 +953,10 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
   const [note, setNote] = useState('')
   const [date, setDate] = useState(todayStr)
   const [reference, setReference] = useState('')
+  const [paymentSource, setPaymentSource] = useState('')
+  const imported = donations.filter(d => d.bankImportKey && !d.deleted && !d.collectionID &&
+    d.accountID === accountID && Number(d.amount) === Number(data.amount) &&
+    (!d.donorID || d.donorID === data.donorID) && (!d.installmentPlanID || d.installmentPlanID === data.planID))
   const [confirmed, setConfirmed] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -986,6 +990,16 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
           </Select>
         </Field>
       )}
+      {!materials && !cash && (pending || (row.status === 'Approved' && imported.length > 0 && !donations.some(d => d.collectionID === row.id && d.bankImportKey))) && (
+        <Field label={pending ? 'How was this payment recorded?' : 'Correct a payment counted twice'}>
+          <Select value={paymentSource} onChange={e => { setPaymentSource(e.target.value); setConfirmed(false) }}>
+            <option value="">Select payment record</option>
+            {imported.map(d => <option key={d.donationID} value={d.donationID}>{formatDate(d.date)} · {d.donorName} · {formatCurrency(d.amount)} · {d.transactionReference || d.receiptNumber}</option>)}
+            {pending && <option value="new">New bank payment</option>}
+          </Select>
+          {!pending && <Button disabled={busy || !paymentSource} onClick={() => save(() => dataService.reviewCollection(row.id, 'Approved', '', accountID, true, paymentSource))}>Replace duplicate with selected bank receipt</Button>}
+        </Field>
+      )}
       {pending && !materials && !cash && <label className="flex gap-2 text-sm">
         <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
         I verified this reference and amount against the selected bank account.
@@ -994,7 +1008,7 @@ function CollectionDecision({ row, onSaved }: { row: CollectionEntry; onSaved: (
         <>
           <Field label="Review note" hint="Required when returning or rejecting a collection."><Input value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} /></Field>
           <div className="flex flex-wrap gap-2">
-            <Button disabled={busy || (!materials && !cash && (!accountID || !confirmed))} onClick={() => save(() => dataService.reviewCollection(row.id, 'Approved', note, accountID, confirmed))}>Approve</Button>
+            <Button disabled={busy || (!materials && !cash && (!accountID || !confirmed || !paymentSource))} onClick={() => save(() => dataService.reviewCollection(row.id, 'Approved', note, accountID, confirmed, paymentSource === "new" ? undefined : paymentSource))}>Approve</Button>
             <Button variant="secondary" disabled={busy || !note.trim()} onClick={() => save(() => dataService.reviewCollection(row.id, 'Needs correction', note, '', false))}>Return for correction</Button>
             <Button variant="secondary" disabled={busy || !note.trim()} onClick={() => save(() => dataService.reviewCollection(row.id, 'Rejected', note, '', false))}>Reject</Button>
           </div>
